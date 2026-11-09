@@ -1,0 +1,30 @@
+{
+  "name": "arkts-port",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Source-level Android -> HarmonyOS (ArkTS) migration pipeline with verifiable gates",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "coupling": "node cli/analyze-coupling.ts",
+    "doctor": "node cli/doctor.ts",
+    "closure": "node cli/extract-closure.ts",
+    "context": "node cli/pack-context.ts",
+    "gen-golden": "node cli/gen-golden.ts",
+    "fidelity": "node cli/verify-fidelity.ts",
+    "adapt": "node cli/adapt-arkts.ts",
+    "diff-gate": "node cli/diff-gate.ts",
+    "explain": "node cli/explain-errors.ts",
+    "lint": "node cli/lint-arkts.ts",
+    "reach": "node cli/reachability-probe.ts",
+    "build": "node cli/build-hap.ts",
+    "port": "node cli/port.ts",
+    "stage": "node scripts/stage-case.mjs",
+    "acceptance": "node scripts/acceptance.mjs",
+    "mcp": "node cli/mcp-server.ts",
+    "js-ts-case": "node cases/js-ts/run.mjs",
+    "device-test": "node cli/device-test.ts",
+    "docs-metrics": "node cli/docs-metrics.ts",
+    "test": "node --test"
+  }
+}

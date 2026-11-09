@@ -1,0 +1,90 @@
+{
+  "jvm": {
+    "name": "Kotlin / Java（JVM）",
+    "extensions": [".kt", ".java"],
+    "platformPatterns": [
+      "^\\s*import\\s+(android\\.|androidx\\.|com\\.google\\.android\\.|dagger\\.|kotlinx\\.coroutines)"
+    ],
+    "goldenRunner": "kotlinc src -d out && kotlin -cp out <package>.Main",
+    "harnessTemplate": "templates/kotlin-harness",
+    "semanticStage": "需要（Kotlin → TS）",
+    "status": "verified"
+  },
+  "js-ts": {
+    "name": "JavaScript / TypeScript（React Native、小程序、Hybrid）",
+    "extensions": [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"],
+    "platformPatterns": [
+      "from\\s+['\"]react-native['\"]",
+      "require\\(\\s*['\"]react-native['\"]",
+      "from\\s+['\"]@tarojs/",
+      "from\\s+['\"]vue['\"]",
+      "require\\(\\s*['\"]vue['\"]\\s*\\)",
+      "from\\s+['\"]vue[/-]",
+      "from\\s+['\"]@vue/",
+      "from\\s+['\"]pinia['\"]",
+      "from\\s+['\"]vue-router['\"]",
+      "from\\s+['\"]element-plus(?:/[^'\"]*)?['\"]",
+      "from\\s+['\"]@element-plus/",
+      "from\\s+['\"]axios['\"]",
+      "require\\(\\s*['\"]axios['\"]\\s*\\)",
+      "from\\s+['\"]vite['\"]",
+      "from\\s+['\"]@vitejs/",
+      "from\\s+['\"]vite-plugin-[^'\"]*['\"]",
+      "\\bimport\\.meta\\.env\\b",
+      "from\\s+['\"][^'\"]+\\.(?:vue|css|scss|sass|less|styl|png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|eot|mp[34]|wav)(?:\\?[^'\"]*)?['\"]",
+      "import\\s+['\"][^'\"]+\\.(?:vue|css|scss|sass|less|png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|eot|mp[34]|wav)(?:\\?[^'\"]*)?['\"]",
+      "\\bnew\\s+(?:WebSocket|FileReader|IntersectionObserver|MutationObserver|ResizeObserver|XMLHttpRequest|EventSource|Audio|Image)\\b",
+      "\\brequestAnimationFrame\\b",
+      "(?<![\\w$.])(?:document|window|localStorage|sessionStorage|history)\\.\\w+",
+      "(?<![\\w$.])navigator\\.\\w+",
+      "(?<![\\w$.])location\\.(?:href|pathname|search|hash|reload|assign|replace)\\b",
+      "\\bHTMLElement\\b"
+    ],
+    "goldenRunner": "node harness.mjs > golden.json",
+    "harnessTemplate": "templates/node-harness",
+    "semanticStage": "可跳过（ArkTS 是 TS 超集，直接进适配阶段）",
+    "status": "planned"
+  },
+  "dart": {
+    "name": "Dart（Flutter）",
+    "extensions": [".dart"],
+    "platformPatterns": [
+      "^\\s*import\\s+['\"]package:flutter/",
+      "^\\s*import\\s+['\"]dart:ui['\"]",
+      "^\\s*import\\s+['\"]dart:io['\"]"
+    ],
+    "goldenRunner": "dart run harness.dart > golden.json",
+    "harnessTemplate": "templates/dart-harness",
+    "semanticStage": "需要（Dart → TS）",
+    "status": "planned",
+    "note": "若目标是整包迁移，优先走 OpenHarmony SIG 的 flutter_flutter 重编，不做源码转换"
+  },
+  "c-cpp": {
+    "name": "C / C++（NDK 原生库）",
+    "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"],
+    "platformPatterns": [
+      "#include\\s*<android/",
+      "#include\\s*<jni\\.h>",
+      "#include\\s*<GLES[23]?/",
+      "#include\\s*<SLES/"
+    ],
+    "goldenRunner": "clang++ -std=c++17 harness.cpp -o harness && ./harness > golden.json",
+    "harnessTemplate": "templates/cpp-harness",
+    "semanticStage": "需要，且风险最高（指针/内存/未定义行为）",
+    "status": "restricted",
+    "note": "只建议用于纯算法库；有源码可改用 OHOS NDK 重编为 .so，不走转写"
+  },
+  "swift": {
+    "name": "Swift（iOS）",
+    "extensions": [".swift"],
+    "platformPatterns": [
+      "^\\s*import\\s+UIKit",
+      "^\\s*import\\s+SwiftUI",
+      "^\\s*import\\s+Foundation"
+    ],
+    "goldenRunner": "swiftc harness.swift -o harness && ./harness > golden.json（需 macOS）",
+    "harnessTemplate": "templates/swift-harness",
+    "semanticStage": "需要（Swift → TS）",
+    "status": "planned"
+  }
+}

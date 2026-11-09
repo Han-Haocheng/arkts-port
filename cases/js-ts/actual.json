@@ -1,0 +1,1 @@
+[{"scenario":"empty","results":[{"case":"position=0","value":-1}]},{"scenario":"bounds","results":[{"case":"position=0","value":0},{"case":"position=2","value":0},{"case":"position=7","value":1},{"case":"position=11","value":1},{"case":"position=12","value":1},{"case":"position=99","value":1}]}]
