@@ -10,6 +10,8 @@
  * 默认形状（cases/legado 使用）：[{ scenario, pageCount, pages: [{ text, ... }] }]
  * 门禁口径：100% 逐项一致 **且** golden 里的场景在 actual 中全部存在。
  * 缺失场景（golden 有、actual 无）算 FAIL —— 不能因为「没得比」就判通过。
+ * totalItems=0（没有任何可比较 item）单独记为 NO_ITEMS：场景全等时 exit 0（输出 N/A，不打印误导的
+ * 0%），有缺失场景/结构差异仍 FAIL；JSON 增 noItems/verdict（fidelityPct 在 NO_ITEMS 时为 null）。
  *
  * 退出码：0 = 100% 一致且无缺失场景；1 = 有差异或缺失场景；2 = 用法/文件缺失。
  */
@@ -34,10 +36,14 @@ const USAGE = [
   '  --help, -h          显示本帮助',
   '',
   '输出（默认，供 cli/port.ts 解析）：',
-  '  保真度: <pct>%  (<same>/<total>)',
+  '  保真度: <pct>%  (<same>/<total>)              items 比对正常时',
+  '  保真度: N/A（0 items 可比较）                 totalItems=0 时（NO_ITEMS），不再打印误导的 0%',
   '  场景全等: <same>/<total>',
   '  DIFF <scenario> ... / MISSING <scenario>',
-  '  门禁: PASS|FAIL（必须 100%）',
+  '  门禁: PASS|FAIL（必须 100%）；NO_ITEMS 且场景全等 → PASS（exit 0），有缺失场景/结构差异仍 FAIL',
+  '',
+  'JSON 字段：totalItems / sameItems / fidelityPct（NO_ITEMS 时为 null）/ sameScenarios / totalScenarios /',
+  '  missingScenarios / noItems / verdict(PASS|FAIL|NO_ITEMS) / pass / details',
   '',
   '退出码：0 = 100% 一致且无缺失场景；1 = 有差异或缺失场景；2 = 用法/文件缺失',
 ].join('\n');
@@ -157,15 +163,23 @@ for (const g of golden) {
   });
 }
 
-const pct = totalItems === 0 ? 0 : sameItems * 100 / totalItems;
-const pass = pct === 100 && missingScenarios === 0;
+// totalItems=0 是「没有可比对的 item」，不是「0% 保真」：
+// - 场景齐全且结构一致 → NO_ITEMS（PASS，exit 0）
+// - 有缺失场景/结构差异 → FAIL（exit 1）
+const noItems = totalItems === 0;
+const allScenariosEqual = missingScenarios === 0 && sameScenarios === golden.length;
+const pct = noItems ? 0 : sameItems * 100 / totalItems;
+const pass = noItems ? allScenariosEqual : sameItems === totalItems && missingScenarios === 0;
+const verdict = pass ? (noItems ? 'NO_ITEMS' : 'PASS') : 'FAIL';
 const result = {
   totalItems,
   sameItems,
-  fidelityPct: Math.round(pct * 100) / 100,
+  fidelityPct: noItems ? null : Math.round(pct * 100) / 100,
   sameScenarios,
   totalScenarios: golden.length,
   missingScenarios,
+  noItems,
+  verdict,
   pass,
   details,
 };
@@ -173,8 +187,14 @@ const result = {
 if (args.json) {
   console.log(JSON.stringify(result, null, 1));
 } else {
-  console.log('保真度: ' + result.fidelityPct + '%  (' + result.sameItems + '/' + result.totalItems + ')');
-  console.log('场景全等: ' + result.sameScenarios + '/' + result.totalScenarios);
+  if (noItems) {
+    console.log('保真度: N/A（0 items 可比较）');
+    console.log('场景全等: ' + result.sameScenarios + '/' + result.totalScenarios);
+    console.log('警告: NO_ITEMS —— golden/actual 里没有任何可比较的 item；场景全等时按 NO_ITEMS 判定（exit 0），有缺失场景/结构差异仍 FAIL');
+  } else {
+    console.log('保真度: ' + result.fidelityPct + '%  (' + result.sameItems + '/' + result.totalItems + ')');
+    console.log('场景全等: ' + result.sameScenarios + '/' + result.totalScenarios);
+  }
   for (const d of details) {
     if (d.status === 'missing') {
       console.log('  MISSING ' + String(d.scenario));
@@ -192,7 +212,9 @@ if (args.json) {
   if (missingScenarios > 0) {
     console.log('缺失场景: ' + missingScenarios + ' 个（golden 有、actual 无）算 FAIL');
   }
-  console.log(pass ? '门禁: PASS' : '门禁: FAIL（必须 100%）');
+  console.log(pass
+    ? (noItems ? '门禁: PASS（NO_ITEMS：无可比较 items，未做逐项比对）' : '门禁: PASS')
+    : '门禁: FAIL（必须 100%）');
 }
 
 process.exitCode = pass ? 0 : 1;

@@ -1,5 +1,7 @@
 # Architecture
 
+[Documentation index](README.md) · [简体中文](architecture.zh-CN.md)
+
 ## 1. Scope and invariant
 
 arkts-port migrates source modules to HarmonyOS ArkTS. It is built around one invariant:
@@ -34,24 +36,25 @@ These steps run once per module, before the orchestrated gate sequence.
 | Closure | `extract-closure` | Minimal compilable closure from an entry. Files are classified as `include`, `coupled` boundary, or `test`; unresolved symbols and removable platform imports are reported. |
 | Context | `pack-context` | Deterministic Markdown pack with a file list, signature index (no function bodies), and `F32:` floating-point markers. Large inputs are split into fixed-name shards. |
 | Baseline | `gen-golden` | Compiles and runs the original twice. `golden.json` is written only when both runs are byte-identical. Without a harness, it emits a scaffold and exits 4. |
-| Fidelity | `verify-fidelity` | Compares golden and actual item by item and scenario by scenario. A scenario present in golden but absent from actual is `MISSING` and fails the gate. |
+| Fidelity | `verify-fidelity` | Compares golden and actual item by item and scenario by scenario. A scenario present in golden but absent from actual is `MISSING` and fails the gate. Zero comparable items is `NO_ITEMS` and passes only when the scenarios match. |
 
-`extract-closure --out` must be outside `--root` (debugging with `--force` is the only exception); the tool keeps a manifest and removes stale managed files. For JS/TS, relative imports (ESM, CommonJS, dynamic `import()`, directory indexes, extension swaps) and non-relative imports are resolved. Non-relative specifiers are looked up through `tsconfig.json`/`jsconfig.json` `baseUrl` + `paths` first and `vite.config` `resolve.alias` second, by static parsing without `eval`; anything still unresolved becomes `external`. `--no-alias` disables alias resolution.
+`extract-closure --out` may stay outside `--root` or inside a safe top-level subdirectory of it (`.refs/`, `out/`, `dist/`, `build/`); other subdirectories require `--allow-out-in-root` (`--force` is equivalent but warns); the tool keeps a manifest and removes stale managed files. For JS/TS, relative imports (ESM, CommonJS, dynamic `import()`, directory indexes, extension swaps) and non-relative imports are resolved. Non-relative specifiers are looked up through `tsconfig.json`/`jsconfig.json` `baseUrl` + `paths` first and `vite.config` `resolve.alias` second, by static parsing without `eval`; anything still unresolved becomes `external`. `--no-alias` disables alias resolution.
 
-### 3.2 The eight `port` stages
+### 3.2 The nine `port` stages
 
-`port` runs stages in a fixed order. `--stages` selects a subset but never changes the order. Without `--device`, the default sequence has seven stages.
+`port` runs stages in a fixed order. `--stages` selects a subset but never changes the order. `autofix` is opt-in; without `--device` and `--autofix`, the default sequence has seven stages.
 
 | # | Stage | Tool and input | Passes when | Missing input |
 |---|---|---|---|---|
 | 1 | `analyze` | `analyze-coupling` on `--src` | Analysis completes | `SKIP` when no `--src` |
 | 2 | `adapt` | `adapt-arkts` from `--adapt-src`/`--src` to `--adapted` | No residual, unless `--allow-residuals`; scanning zero files is a failure | `SKIP` when the adapter cannot run |
-| 3 | `diff` | `diff-gate` before/after adaptation | Exit 0 (no `needs-review`) | `SKIP` when inputs are absent |
-| 4 | `fidelity` | `verify-fidelity` on case golden and actual | 100% items and scenarios; no `MISSING` | `SKIP` when the case is absent |
-| 5 | `lint` | `lint-arkts` on `--project` | 0 ERROR + 0 WARN-level `arkts-*` | `SKIP` without SDK or hvigor |
-| 6 | `reach` | `reachability-probe` on `--project` | 0 ERROR + 0 WARN-level `arkts-*` across all modules | `SKIP` without SDK or hvigor |
-| 7 | `build` | `build-hap` on `--project` | `BUILD SUCCESSFUL` | `SKIP` without SDK or hvigor |
-| 8 | `device` | `device-test` | Requested steps succeed; check-only unless a signed HAP is supplied | Opt-in only: absent `--device` leaves the stage out |
+| 3 | `autofix` | `arkts-fix` from the adaptation output to a fixed copy | `arkts-fix` exits 0; zero transforms is still success; when files change, only `diff` uses the fixed copy | Opt-in only: absent `--autofix`; `SKIP` when the adaptation output is absent |
+| 4 | `diff` | `diff-gate` before/after adaptation | Exit 0 (no `needs-review`) | `SKIP` when inputs are absent |
+| 5 | `fidelity` | `verify-fidelity` on case golden and actual | 100% items and scenarios; no `MISSING`; zero comparable items is `NO_ITEMS` and passes only when scenarios match | `SKIP` when the case is absent |
+| 6 | `lint` | `lint-arkts` on `--project` | 0 ERROR + 0 WARN-level `arkts-*` | `SKIP` without SDK or hvigor |
+| 7 | `reach` | `reachability-probe` on `--project` | 0 ERROR + 0 WARN-level `arkts-*` across all modules | `SKIP` without SDK or hvigor |
+| 8 | `build` | `build-hap` on `--project` | `BUILD SUCCESSFUL` | `SKIP` without SDK or hvigor |
+| 9 | `device` | `device-test` | Requested steps succeed; check-only unless a signed HAP is supplied | Opt-in only: absent `--device` leaves the stage out |
 
 For `fidelity`, actual data is selected in this order: `--actual`, then a replay through `cases/<case>/replay.ts`, then `<case>/actual.json`. After a `lint` or `reach` failure, `port` automatically runs `explain-errors` and adds a compact diagnostic to the stage summary. That diagnostic does not change the gate result.
 
@@ -60,7 +63,7 @@ For `fidelity`, actual data is selected in this order: `--actual`, then a replay
 | Gate | Passes only when | Failure behavior |
 |---|---|---|
 | `gen-golden` | Two runs are byte-identical | Exit 3 when outputs differ; exit 4 when the harness is missing; no golden is written |
-| `verify-fidelity` | 100% of items and scenarios match, with no missing scenario | Exit 1 |
+| `verify-fidelity` | 100% of items and scenarios match, with no missing scenario; `NO_ITEMS` passes when scenarios match | Exit 1 |
 | `adapt-arkts` | No residual when `--fail-on-residual` is set | Exit 3 |
 | `diff-gate` | No `needs-review` class | Exit 3 means warning by default; `--strict` turns it into exit 1 |
 | `lint-arkts` | 0 ERROR and 0 WARN-level `arkts-*` | Exit 1 |
@@ -99,7 +102,7 @@ The toolchain is designed so that evidence can be diffed, archived, and re-check
 - Reports are JSON with stable key and array ordering. They contain no timestamps and no absolute paths, so equal inputs produce byte-identical reports.
 - `gen-golden` proves stability by running the original twice before writing anything.
 - Staged case evidence is copied with sha256 verification and a deterministic provenance file.
-- `docs-metrics` recomputes canonical numbers from the case truth files (golden, actual, baseline sources, adapted sources, error JSON, coverage JSON). Its `--check` mode scans documentation for contradicting claims; the check reports 0 mismatches on the checked targets.
+- `docs-metrics` recomputes canonical numbers from the case truth files (golden, actual, baseline sources, adapted sources, error JSON, coverage JSON). Its `--check` mode scans documentation for contradicting claims and reports 0 mismatches in the current snapshot.
 - The CLIs use Node's native TypeScript type stripping, so there is no build artifact that can drift from the sources. There are no runtime dependencies.
 
 ## 7. Reports, logs, and exit codes
@@ -145,13 +148,13 @@ Adding a language means filling those hooks, not editing the gate sequence. The 
 |---|---|
 | `cli/` | Deterministic entrypoints shared by humans, CI, and MCP |
 | `adapters/` | Language contracts and coupling rules |
-| `rules/` | ArkTS restrictions, pitfalls, and API mapping |
+| `rules/` | ArkTS restrictions, pitfalls, API mapping, conversion-share and UI mapping rules |
 | `skills/arkts-port/` | Fixed operating procedure for agents |
 | `cases/` | Reproducible harnesses, goldens, actuals, and case scripts |
 | `scripts/` | External evidence staging and end-to-end acceptance |
 | `templates/` | Harness scaffolds for each language |
 | `tests/` | Node test suite for the CLIs and gates |
-| `docs/` | Architecture, tool reference, and case evidence |
+| `docs/` | Architecture, tool reference, case evidence, and the documentation index |
 
 ## 10. Limits and threats to validity
 
@@ -160,7 +163,7 @@ Adding a language means filling those hooks, not editing the gate sequence. The 
 - **Floating point remains a risk.** The legado transcript marks 52 `F32:` points, but none fired in the synthetic scenarios. Real font metrics may exercise them.
 - **The codemod is lexical and intentionally conservative.** It does not rewrite template-literal interiors or nested object types, and cross-file renames only apply to `import type` usages where every use is a type position. Unhandled cases become residuals rather than unsafe rewrites.
 - **`diff-gate` is not a semantic proof.** It classifies line-level changes and flags anything that may alter runtime behavior; a human must review those flags.
-- **UI is out of scope.** Compose-to-ArkUI and general rendering, layout, and gesture work are manual rewrites. The pipeline covers logic that can produce a deterministic golden.
+- **UI equivalence is out of scope.** `ui-skeleton` can generate a mechanical ArkUI skeleton from one Compose file, but layout, gesture, rendering, and behavioral equivalence remain manual rewrites. The pipeline's fail-closed gates still cover logic that can produce a deterministic golden.
 - **hvigor log parsing is a compatibility surface.** WARN-level `arkts-*` extraction depends on hvigor's log format; upgrades require re-validating `lint-arkts`, `reachability-probe`, and `explain-errors` together.
 - **Signing is external.** `build-hap` produces an unsigned HAP unless the project configures signing. Device installation was verified with a debug-profile signed HAP from Huawei AGC; the tool does not bypass signing.
-- **Case sources carry their own licenses.** The repository has no LICENSE file. GPL-derived and MIT-licensed third-party sources are kept outside the repository and are never committed.
+- **Case sources carry their own licenses.** The repository is MIT-licensed (see [LICENSE](../LICENSE) and [THIRD_PARTY_LICENSES](../THIRD_PARTY_LICENSES)). GPL-derived and MIT-licensed third-party sources are kept outside the repository and are never committed.

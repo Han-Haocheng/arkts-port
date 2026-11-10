@@ -340,24 +340,77 @@ test('--out 越界：等于/位于 --root 内 → exit 2 且不落盘；父目�
   });
 });
 
-test('--force：显式允许 --out 位于 --root 内（打警告），但等于 --root 仍拒绝', () => {
+test('--force：允许 --out 位于 --root 内（打警告），但等于 --root / 源码目录仍拒绝', () => {
   withTempDir((dir) => {
     const project = join(dir, 'project');
     const entryRel = 'src/main/java/demo/A.kt';
     mkdirSync(dirname(join(project, entryRel)), { recursive: true });
     writeFileSync(join(project, entryRel), 'package demo\n\nfun run(): Int = 1\n', 'utf8');
 
-    const refused = runCli(['--root', project, '--entry', entryRel, '--out', join(project, 'out')]);
+    // 非安全子目录默认拒绝
+    const refused = runCli(['--root', project, '--entry', entryRel, '--out', join(project, 'nested-out')]);
     assert.equal(refused.status, 2);
-    assert.equal(existsSync(join(project, 'out')), false);
+    assert.equal(existsSync(join(project, 'nested-out')), false);
 
+    // --force 在安全子目录上仍可用（打警告）
     const forced = runCli(['--root', project, '--entry', entryRel, '--out', join(project, 'out'), '--force']);
     assert.equal(forced.status, 0, forced.stderr);
     assert.ok(forced.stderr.includes('警告'));
     assert.ok(existsSync(join(project, 'out', entryRel)));
 
+    // --force 也允许非安全子目录（前提是目录里没有源码文件）
+    const forcedNested = runCli(['--root', project, '--entry', entryRel, '--out', join(project, 'nested-out'), '--force']);
+    assert.equal(forcedNested.status, 0, forcedNested.stderr);
+    assert.ok(forcedNested.stderr.includes('警告'));
+
     const stillRefused = runCli(['--root', project, '--entry', entryRel, '--out', project, '--force']);
     assert.equal(stillRefused.status, 2);
+
+    // 源码目录即使 --force 也拒绝（fail-closed）
+    const sourceRefused = runCli(['--root', project, '--entry', entryRel, '--out', join(project, 'src'), '--force']);
+    assert.equal(sourceRefused.status, 2);
+    assert.match(sourceRefused.stderr, /源码目录/);
+  });
+});
+
+test('安全子目录默认可用：--out 位于 --root 内的 .refs/out/dist/build 不再需要 --force', () => {
+  withTempDir((dir) => {
+    const project = join(dir, 'project');
+    const entryRel = 'src/main/java/demo/A.kt';
+    mkdirSync(dirname(join(project, entryRel)), { recursive: true });
+    writeFileSync(join(project, entryRel), 'package demo\n\nfun run(): Int = 1\n', 'utf8');
+    for (const sub of ['.refs/closure', 'out', 'dist', 'build']) {
+      const outDir = join(project, sub);
+      const res = runCli(['--root', project, '--entry', entryRel, '--out', outDir]);
+      assert.equal(res.status, 0, sub + ': ' + res.stderr);
+      assert.ok(existsSync(join(outDir, entryRel)), sub + ' 应复制 include 文件');
+    }
+  });
+});
+
+test('--allow-out-in-root：放行非安全子目录，但已有源码文件的目录仍 fail-closed', () => {
+  withTempDir((dir) => {
+    const project = join(dir, 'project');
+    const entryRel = 'src/main/java/demo/A.kt';
+    const source = 'package demo\n\nfun run(): Int = 1\n';
+    mkdirSync(dirname(join(project, entryRel)), { recursive: true });
+    writeFileSync(join(project, entryRel), source, 'utf8');
+
+    const nested = join(project, 'nested-out');
+    const refused = runCli(['--root', project, '--entry', entryRel, '--out', nested]);
+    assert.equal(refused.status, 2);
+    assert.match(refused.stderr, /--allow-out-in-root/);
+    assert.equal(existsSync(nested), false);
+
+    const allowed = runCli(['--root', project, '--entry', entryRel, '--out', nested, '--allow-out-in-root']);
+    assert.equal(allowed.status, 0, allowed.stderr);
+    assert.ok(allowed.stderr.includes('警告'));
+    assert.ok(existsSync(join(nested, entryRel)));
+
+    const sourceRefused = runCli(['--root', project, '--entry', entryRel, '--out', join(project, 'src'), '--allow-out-in-root']);
+    assert.equal(sourceRefused.status, 2);
+    assert.match(sourceRefused.stderr, /源码目录/);
+    assert.equal(readFileSync(join(project, entryRel), 'utf8'), source, '源码文件不应被覆盖');
   });
 });
 
@@ -488,7 +541,7 @@ const JS_FIXTURE: { path: string; content: string }[] = [
 
 function withJsFixture(fn: (root: string, workDir: string) => void): void {
   const root = mkdtempSync(join(tmpdir(), 'arkts-jsfix-'));
-  // workDir 必须放在工程外：--out 位于 --root 内会被守卫拒绝（这是被测行为之一）
+  // workDir 放在工程外（默认路径）；--out 在 --root 内只允许 .refs/out/dist/build 等安全子目录
   const workDir = mkdtempSync(join(tmpdir(), 'arkts-jswork-'));
   for (const file of JS_FIXTURE) {
     const target = join(root, file.path);
@@ -563,10 +616,14 @@ test('js-ts 的 --out：复制 include、保留越界守卫与受管清单，不
     assert.equal(existsSync(join(outDir, 'src/platform/native.ts')), false, 'boundary 不应被复制');
     const manifest = JSON.parse(readFileSync(join(outDir, '.extract-closure-manifest.json'), 'utf8')) as { files: string[] };
     assert.equal(manifest.files.length, 10);
-    // 越界守卫对 js-ts 同样生效
-    const inside = runCli(['--root', root, '--lang', 'js-ts', '--entry', 'src/a.js', '--out', join(root, 'out')]);
+    // 越界守卫对 js-ts 同样生效：非安全子目录仍拒绝
+    const inside = runCli(['--root', root, '--lang', 'js-ts', '--entry', 'src/a.js', '--out', join(root, 'nested-out')]);
     assert.equal(inside.status, 2);
-    assert.equal(existsSync(join(root, 'out')), false);
+    assert.equal(existsSync(join(root, 'nested-out')), false);
+    // 安全子目录（out/）默认允许，不再需要 --force
+    const safe = runCli(['--root', root, '--lang', 'js-ts', '--entry', 'src/a.js', '--out', join(root, 'out')]);
+    assert.equal(safe.status, 0, safe.stderr);
+    assert.ok(existsSync(join(root, 'out', 'src/a.js')), 'out/ 安全子目录应复制 include 文件');
   });
 });
 

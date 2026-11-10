@@ -7,7 +7,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -294,7 +294,7 @@ test('报告结构：summary 只含约定的 7 个计数，changes/residuals 字
   for (const change of changes) {
     assert.ok(typeof change.file === 'string' && change.file.length > 0);
     assert.ok(Number.isInteger(change.line) && change.line > 0);
-    assert.ok(['constructor-options', 'copy-patch', 'type-rename', 'type-ref', 'map-interface', 'ets-import'].indexOf(change.rule) >= 0);
+    assert.ok(['constructor-options', 'copy-patch', 'type-rename', 'type-ref', 'map-interface', 'ets-import', 'extension-rename'].indexOf(change.rule) >= 0);
   }
   const ruleCount = (rule: string): number => changes.filter((item) => item.rule === rule).length;
   assert.equal(ruleCount('constructor-options'), 1);
@@ -410,4 +410,35 @@ after(() => {
     const dir = TEMP_DIRS.pop();
     if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('--ets：只改扩展名的文件以 extension-rename 计入 changes[]，filesChanged 与 changes[] 一致', () => {
+  const dir = makeTempDir();
+  const src = join(dir, 'src');
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, 'main.ts'), 'import { helper } from "./helper.ts";\nexport const value = helper();\n', 'utf8');
+  writeFileSync(join(src, 'helper.ts'), 'export const helper = () => 1;\n', 'utf8');
+  const outDir = join(dir, 'out');
+  const result = runCli(['--src', src, '--out', outDir, '--ets', '--json']);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as {
+    summary: { filesChanged: number };
+    changes: Array<{ file: string; line: number; rule: string }>;
+  };
+  assert.equal(summaryOf(report as unknown as Record<string, unknown>).filesChanged, 2);
+  // 回归 #7：两个变更文件各 1 条 change（main.ts 的 ets-import + helper.ts 的 extension-rename），数量必须对得上
+  assert.equal(report.changes.length, report.summary.filesChanged);
+  assert.equal(new Set(report.changes.map((change) => change.file)).size, report.summary.filesChanged);
+  const byRule = new Map(report.changes.map((change) => [change.rule, change.file]));
+  assert.equal(byRule.get('ets-import'), 'main.ts');
+  assert.equal(byRule.get('extension-rename'), 'helper.ts');
+  const renameRow = report.changes.find((change) => change.rule === 'extension-rename');
+  assert.ok(renameRow !== undefined);
+  assert.equal(renameRow!.line, 1);
+  assert.ok(existsSync(join(outDir, 'main.ets')) && existsSync(join(outDir, 'helper.ets')));
+  // 幂等：对 .ets 产物再跑一次应无变更
+  const second = runCli(['--src', outDir, '--out', join(dir, 'out2'), '--ets', '--json']);
+  const secondReport = JSON.parse(second.stdout) as { summary: { filesChanged: number }; changes: unknown[] };
+  assert.equal(secondReport.summary.filesChanged, 0);
+  assert.deepEqual(secondReport.changes, []);
 });

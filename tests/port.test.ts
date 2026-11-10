@@ -154,6 +154,16 @@ function makeSandbox(t: TestHooks): string {
       logPath: 'out/logs/device-test.log',
     }),
   });
+  writeFakeTool(cliDir, 'arkts-fix', {
+    writeReport: true,
+    report: {
+      ok: true,
+      rules: {},
+      files: [],
+      totals: { files: 2, changed: 0, transforms: 0, skips: 0 },
+    },
+    stdout: JSON.stringify({ ok: true, rules: {}, totals: { files: 2, changed: 0, transforms: 0, skips: 0 } }),
+  });
 
   // 最小前置：工程 + 入口页 / SDK 26.0.0 / hvigor / 源码 / 案例
   mkdirSync(join(dir, 'project', 'entry', 'src', 'main', 'ets', 'pages'), { recursive: true });
@@ -188,9 +198,13 @@ test('--help 打印用法并 exit 0', () => {
   assert.match(res.stdout, /node cli\/port\.ts/);
   assert.match(res.stdout, /退出码：0 = 没有 FAIL 且没有 SKIP（PASS\/WARN 通过）/);
   assert.match(res.stdout, /--strict-diff/);
-  for (const flag of ['--device', '--signed-hap', '--bundle', '--ability', '--hdc', '--device-timeout']) {
+  for (const flag of ['--device', '--signed-hap', '--bundle', '--ability', '--hdc', '--device-timeout',
+    '--autofix', '--no-autofix', '--arkts-fix-out',
+    '--fidelity-key', '--fidelity-items', '--fidelity-field']) {
     assert.ok(res.stdout.includes(flag), '--help 应包含 ' + flag);
   }
+  assert.match(res.stdout, /fixed 目录只影响 diff/);
+  assert.match(res.stdout, /lint\/reach\/build 仍按 --project/);
   assert.match(res.stdout, /WARN/);
   assert.match(res.stdout, /--stages/);
 });
@@ -354,6 +368,91 @@ test('验收：--case cases/legado --stages fidelity → PASS（100%）且报告
   assert.match(log, /# 状态: PASS/);
   assert.match(log, /# 退出码: 0/);
   assert.match(log, /verify-fidelity\.ts/);
+});
+
+// ---------------------------------------------------------------------------
+// B-11：fidelity schema 假 PASS（replacement-rule 默认 items=pages/field=text）
+// ---------------------------------------------------------------------------
+
+function useRealFidelity(sandbox: string): void {
+  cpSync(join(repoRoot, 'cli', 'verify-fidelity.ts'), join(sandbox, 'cli', 'verify-fidelity.ts'));
+}
+
+function writeResultCase(sandbox: string, goldenValue: number, actualValue: number): void {
+  writeFileSync(
+    join(sandbox, 'case', 'golden.json'),
+    JSON.stringify([{ scenario: 's1', result: [{ value: goldenValue }] }]),
+    'utf8',
+  );
+  writeFileSync(
+    join(sandbox, 'case', 'actual.json'),
+    JSON.stringify([{ scenario: 's1', result: [{ value: actualValue }] }]),
+    'utf8',
+  );
+}
+
+function fidelityArgs(sandbox: string, extra: string[] = []): string[] {
+  return [
+    '--case', 'case', '--stages', 'fidelity', ...extra,
+    '--logs', join(sandbox, 'logs'), '--report', join(sandbox, 'report.json'),
+  ];
+}
+
+test('fidelity schema：golden 用 result、未显式 items/field → FAIL（不再 NO_ITEMS 假 PASS）', (t) => {
+  const sandbox = makeSandbox(t);
+  useRealFidelity(sandbox);
+  writeResultCase(sandbox, 1, 2);
+  const sandboxPort = join(sandbox, 'cli', 'port.ts');
+
+  const res = runPort(fidelityArgs(sandbox), sandbox, sandboxPort);
+  assert.equal(res.code, 1, res.stdout + res.stderr);
+  assert.match(res.stdout, /FAIL\s+fidelity/);
+  assert.match(res.stdout, /--fidelity-items result/);
+  assert.match(res.stdout, /--fidelity-field value/);
+
+  const report = readJson(join(sandbox, 'report.json'));
+  assert.equal(report.pass, false);
+  const stage = stageByName(report, 'fidelity');
+  assert.equal(stage.status, 'FAIL');
+  assert.equal(stage.exitCode, 1);
+  assert.equal((stage.metrics as Record<string, unknown>).schemaMismatch, 'true');
+  assert.equal(existsSync(join(sandbox, 'calls', 'verify-fidelity.json')), false, 'schema guard 应在 spawn 前 FAIL');
+});
+
+test('fidelity schema：显式 --fidelity-items result --fidelity-field value 后 PASS 1/1', (t) => {
+  const sandbox = makeSandbox(t);
+  useRealFidelity(sandbox);
+  writeResultCase(sandbox, 1, 1);
+  const sandboxPort = join(sandbox, 'cli', 'port.ts');
+
+  const res = runPort(fidelityArgs(sandbox, ['--fidelity-items', 'result', '--fidelity-field', 'value']), sandbox, sandboxPort);
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  assert.match(res.stdout, /PASS\s+fidelity/);
+
+  const report = readJson(join(sandbox, 'report.json'));
+  const stage = stageByName(report, 'fidelity');
+  assert.equal(stage.status, 'PASS');
+  const metrics = stage.metrics as Record<string, unknown>;
+  assert.equal(metrics.fidelityPct, 100);
+  assert.equal(metrics.sameItems, 1);
+  assert.equal(metrics.totalItems, 1);
+});
+
+test('fidelity schema：显式 items/field 后按真实值比较（1 vs 2 → FAIL 0/1）', (t) => {
+  const sandbox = makeSandbox(t);
+  useRealFidelity(sandbox);
+  writeResultCase(sandbox, 1, 2);
+  const sandboxPort = join(sandbox, 'cli', 'port.ts');
+
+  const res = runPort(fidelityArgs(sandbox, ['--fidelity-items', 'result', '--fidelity-field', 'value']), sandbox, sandboxPort);
+  assert.equal(res.code, 1, res.stdout + res.stderr);
+  const report = readJson(join(sandbox, 'report.json'));
+  const stage = stageByName(report, 'fidelity');
+  assert.equal(stage.status, 'FAIL');
+  const metrics = stage.metrics as Record<string, unknown>;
+  assert.equal(metrics.fidelityPct, 0);
+  assert.equal(metrics.sameItems, 0);
+  assert.equal(metrics.totalItems, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -556,6 +655,85 @@ test('--actual：覆盖 case/actual.json 并透传给 verify-fidelity；不存�
   assert.match(String(stage.summary), /--actual 不存在/);
 });
 
+test('fidelity：--fidelity-key/--fidelity-items/--fidelity-field 按需透传（默认不传）', (t) => {
+  const sandbox = makeSandbox(t);
+  const sandboxPort = join(sandbox, 'cli', 'port.ts');
+  const baseArgs = ['--case', 'case', '--stages', 'fidelity'];
+
+  const defaults = runPort(
+    [...baseArgs, '--logs', join(sandbox, 'logs'), '--report', join(sandbox, 'r1.json')],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(defaults.code, 0, defaults.stdout + defaults.stderr);
+  assert.deepEqual(callOf(sandbox, 'verify-fidelity').argv, [
+    '--golden', join('case', 'golden.json'), '--actual', join('case', 'actual.json'), '--json',
+  ], '默认不传 --key/--items/--field');
+
+  const explicit = runPort(
+    [
+      ...baseArgs,
+      '--fidelity-key', 'scenario', '--fidelity-items', 'result', '--fidelity-field', 'content',
+      '--logs', join(sandbox, 'logs'), '--report', join(sandbox, 'r2.json'),
+    ],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(explicit.code, 0, explicit.stdout + explicit.stderr);
+  assert.deepEqual(callOf(sandbox, 'verify-fidelity').argv, [
+    '--golden', join('case', 'golden.json'), '--actual', join('case', 'actual.json'), '--json',
+    '--key', 'scenario', '--items', 'result', '--field', 'content',
+  ], '三个选项都提供时应逐一透传给 verify-fidelity');
+
+  const onlyItems = runPort(
+    [
+      ...baseArgs, '--fidelity-items', 'result',
+      '--logs', join(sandbox, 'logs'), '--report', join(sandbox, 'r3.json'),
+    ],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(onlyItems.code, 0, onlyItems.stdout + onlyItems.stderr);
+  assert.deepEqual(callOf(sandbox, 'verify-fidelity').argv, [
+    '--golden', join('case', 'golden.json'), '--actual', join('case', 'actual.json'), '--json',
+    '--items', 'result',
+  ], '只提供 --fidelity-items 时不能顺手传 --key/--field');
+});
+
+test('fidelity：verify-fidelity FAIL → port FAIL（透传参数不改变门禁结论）', (t) => {
+  const sandbox = makeSandbox(t);
+  const cliDir = join(sandbox, 'cli');
+  writeFakeTool(cliDir, 'verify-fidelity', {
+    exit: 1,
+    stdout: JSON.stringify({
+      totalItems: 0, sameItems: 0, fidelityPct: 0,
+      sameScenarios: 0, totalScenarios: 2, missingScenarios: 2, pass: false,
+    }),
+  });
+  const res = runPort(
+    [
+      '--case', 'case', '--stages', 'fidelity',
+      '--fidelity-key', 'scenario', '--fidelity-items', 'result', '--fidelity-field', 'content',
+      '--logs', join(sandbox, 'logs'), '--report', join(sandbox, 'r.json'),
+    ],
+    sandbox,
+    join(cliDir, 'port.ts'),
+  );
+  assert.equal(res.code, 1, res.stdout + res.stderr);
+  const report = readJson(join(sandbox, 'r.json'));
+  assert.equal(report.pass, false);
+  const stage = stageByName(report, 'fidelity');
+  assert.equal(stage.status, 'FAIL');
+  assert.equal(stage.exitCode, 1);
+  assert.match(String(stage.summary), /缺失 2 场景/);
+  assert.equal((stage.metrics as Record<string, unknown>).missingScenarios, 2);
+
+  const argv = callOf(sandbox, 'verify-fidelity').argv;
+  assert.equal(argv[argv.indexOf('--key') + 1], 'scenario');
+  assert.equal(argv[argv.indexOf('--items') + 1], 'result');
+  assert.equal(argv[argv.indexOf('--field') + 1], 'content');
+});
+
 test('adapt 默认严格：residual>0 → FAIL；--allow-residuals → PASS 且摘要写「已放行」', (t) => {
   const sandbox = makeSandbox(t);
   const cliDir = join(sandbox, 'cli');
@@ -686,6 +864,146 @@ test('lint：以子工具 --json 的 pass 为准（WARN 级违规 → FAIL），
   stage = stageByName(readJson(join(sandbox, 'r3.json')), 'lint');
   assert.equal(stage.status, 'PASS');
   assert.match(String(stage.summary), /ArkTS 错误 0/);
+});
+
+test('autofix 默认关闭：--stages all 无 autofix；显式选用但无 --autofix → exit 2；--arkts-fix-out 也需 --autofix', (t) => {
+  const sandbox = makeSandbox(t);
+  const sandboxPort = join(sandbox, 'cli', 'port.ts');
+  const logsDir = join(sandbox, 'logs');
+  const base = ['--project', 'project', '--src', 'src', '--adapted', 'adapted', '--case', 'case',
+    '--sdk', 'sdk', '--hvigor', 'hvigor', '--stages', 'all', '--logs', logsDir, '--report', join(sandbox, 'r.json')];
+  const res = runPort(base, sandbox, sandboxPort);
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  const report = readJson(join(sandbox, 'r.json'));
+  assert.deepEqual(report.requested, ['analyze', 'adapt', 'diff', 'fidelity', 'lint', 'reach', 'build']);
+  assert.equal(existsSync(join(sandbox, 'calls', 'arkts-fix.json')), false);
+
+  const explicit = runPort(['--stages', 'autofix', '--adapted', 'adapted', '--logs', logsDir], sandbox, sandboxPort);
+  assert.equal(explicit.code, 2);
+  assert.match(explicit.stderr, /autofix/);
+
+  const orphan = runPort(['--arkts-fix-out', 'out/fix', '--stages', 'diff', '--src', 'src', '--adapted', 'adapted'], sandbox, sandboxPort);
+  assert.equal(orphan.code, 2);
+  assert.match(orphan.stderr, /--arkts-fix-out/);
+});
+
+test('autofix 36 处：--autofix 启用，0 transforms 时 diff 直接用 adapt 产物（不复制）', (t) => {
+  const sandbox = makeSandbox(t);
+  const sandboxPort = join(sandbox, 'cli', 'port.ts');
+  const logsDir = join(sandbox, 'logs');
+  const res = runPort(
+    ['--project', 'project', '--src', 'src', '--adapted', 'adapted', '--case', 'case',
+      '--sdk', 'sdk', '--hvigor', 'hvigor', '--autofix', '--stages', 'all',
+      '--logs', logsDir, '--report', join(sandbox, 'r.json')],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  const report = readJson(join(sandbox, 'r.json'));
+  assert.deepEqual(report.requested, ['analyze', 'adapt', 'autofix', 'diff', 'fidelity', 'lint', 'reach', 'build']);
+  const stage = stageByName(report, 'autofix');
+  assert.equal(stage.status, 'PASS');
+  assert.match(String(stage.summary), /0 transforms/);
+  const metrics = stage.metrics as Record<string, unknown>;
+  assert.equal(metrics.transforms, 0);
+  assert.equal(metrics.fixedDir, 'adapted');
+  assert.equal(metrics.appliedToGates, false);
+  assert.equal(metrics.gatesSource, 'project');
+  assert.match(String(stage.summary), /仅 diff/);
+  assert.match(String(stage.summary), /lint\/reach\/build 仍按 --project/);
+  assert.deepEqual(callOf(sandbox, 'arkts-fix').argv, [
+    '--src', 'adapted', '--out', join(logsDir, 'autofix'), '--json', '--report', join(logsDir, 'autofix-report.json'),
+  ]);
+  assert.deepEqual(callOf(sandbox, 'diff-gate').argv, ['--before', 'src', '--after', 'adapted', '--json']);
+});
+
+test('autofix transforms>0：下游 diff 用 fixed 目录，metrics 记录 rules/transforms/changed/skips/fixedDir', (t) => {
+  const sandbox = makeSandbox(t);
+  const cliDir = join(sandbox, 'cli');
+  const sandboxPort = join(cliDir, 'port.ts');
+  const logsDir = join(sandbox, 'logs');
+  mkdirSync(join(logsDir, 'autofix'), { recursive: true });
+  writeFakeTool(cliDir, 'arkts-fix', {
+    writeReport: true,
+    report: {
+      ok: true,
+      rules: { 'enum-from-as-const': 2, 'object-literal-to-interface': 1 },
+      files: [],
+      totals: { files: 2, changed: 1, transforms: 3, skips: 0 },
+    },
+    stdout: JSON.stringify({
+      ok: true,
+      rules: { 'enum-from-as-const': 2, 'object-literal-to-interface': 1 },
+      totals: { files: 2, changed: 1, transforms: 3, skips: 0 },
+    }),
+  });
+  const res = runPort(
+    ['--project', 'project', '--src', 'src', '--adapted', 'adapted', '--case', 'case',
+      '--sdk', 'sdk', '--hvigor', 'hvigor', '--autofix', '--stages', 'all',
+      '--logs', logsDir, '--report', join(sandbox, 'r.json')],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  const stage = stageByName(readJson(join(sandbox, 'r.json')), 'autofix');
+  assert.equal(stage.status, 'PASS');
+  const metrics = stage.metrics as Record<string, unknown>;
+  assert.equal(metrics.rules, 2);
+  assert.equal(metrics.transforms, 3);
+  assert.equal(metrics.changed, 1);
+  assert.equal(metrics.skips, 0);
+  assert.equal(metrics.fixedDir, 'logs/autofix');
+  assert.equal(metrics.appliedToGates, false);
+  assert.equal(metrics.gatesSource, 'project');
+  assert.match(String(stage.summary), /修复 3 处/);
+  assert.match(String(stage.summary), /仅 diff/);
+  assert.match(String(stage.summary), /lint\/reach\/build 仍按 --project/);
+  const diffArgv = callOf(sandbox, 'diff-gate').argv;
+  assert.equal(diffArgv[diffArgv.indexOf('--after') + 1], join(logsDir, 'autofix'));
+});
+
+test('autofix exit 1 → FAIL（默认即停，diff 不跑）；工具缺失且启用 → FAIL + 提示；--no-autofix 不 spawn', (t) => {
+  const sandbox = makeSandbox(t);
+  const cliDir = join(sandbox, 'cli');
+  const sandboxPort = join(cliDir, 'port.ts');
+  const logsDir = join(sandbox, 'logs');
+  writeFakeTool(cliDir, 'arkts-fix', {
+    exit: 1,
+    writeReport: true,
+    report: { ok: false, rules: {}, totals: { files: 1, changed: 0, transforms: 0, skips: 0 } },
+  });
+  const failed = runPort(
+    ['--src', 'src', '--adapted', 'adapted', '--autofix', '--stages', 'adapt,autofix,diff',
+      '--logs', logsDir, '--report', join(sandbox, 'r1.json')],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(failed.code, 1);
+  const failedReport = readJson(join(sandbox, 'r1.json'));
+  assert.equal(stageByName(failedReport, 'autofix').status, 'FAIL');
+  assert.equal(existsSync(join(sandbox, 'calls', 'diff-gate.json')), false);
+
+  rmSync(join(cliDir, 'arkts-fix.ts'), { force: true });
+  const missing = runPort(
+    ['--src', 'src', '--adapted', 'adapted', '--autofix', '--stages', 'autofix',
+      '--logs', logsDir, '--report', join(sandbox, 'r2.json')],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(missing.code, 1);
+  assert.match(String(stageByName(readJson(join(sandbox, 'r2.json')), 'autofix').summary), /arkts-fix\.ts 不存在/);
+
+  rmSync(join(sandbox, 'calls', 'arkts-fix.json'), { force: true });
+  const disabled = runPort(
+    ['--src', 'src', '--adapted', 'adapted', '--autofix', '--no-autofix', '--stages', 'all',
+      '--logs', logsDir, '--report', join(sandbox, 'r3.json')],
+    sandbox,
+    sandboxPort,
+  );
+  assert.equal(disabled.code, 1, '缺少 project/sdk/hvigor 时 build/lint/reach 会 SKIP，整体 1');
+  const disabledReport = readJson(join(sandbox, 'r3.json'));
+  assert.equal(asArray(disabledReport.requested).includes('autofix'), false);
+  assert.equal(existsSync(join(sandbox, 'calls', 'arkts-fix.json')), false);
 });
 
 test('device 默认不启用：--stages all 仍是 7 阶段；显式选 device 但无 --device → exit 2', (t) => {

@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const DEFAULT_REFS = process.env.ARKTS_PORT_CASE_REFS || '';
+export const DEFAULT_REFS = '/mnt/d/Project/legado-with-MD3/.refs';
 export const SOURCE_REL = 'src/utils/chapterProgress.ts';
 
 export function refsRoot() {

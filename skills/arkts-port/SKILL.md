@@ -1,4 +1,7 @@
 # arkts-port
+
+[文档索引](../../docs/README.md) · [English](SKILL.en.md)
+
 Android → HarmonyOS（ArkTS）的可验证迁移。没有 golden 对照的转换不予采信；**agent 只做判断，机械动作交给 CLI**。
 
 ## 何时用 / 不用
@@ -13,8 +16,8 @@ Android → HarmonyOS（ArkTS）的可验证迁移。没有 golden 对照的转�
 4. explain-errors 替代手写脚本；只处理 residuals / needs-review。
 5. 不再手工串命令：优先 port；语义转写一次一个模块，上下文只放 pack + 本 skill。
 
-## 工具状态（2026-11-09 v2）
-✅ 已实现（18 个入口 = 16 个 cli/*.ts + 2 个脚本）：doctor / analyze-coupling / extract-closure / pack-context / gen-golden / verify-fidelity / adapt-arkts / diff-gate / explain-errors / lint-arkts / reachability-probe / port / build-hap / device-test / docs-metrics / mcp-server + `scripts/stage-case.mjs` / `scripts/acceptance.mjs`。
+## 工具状态（2026-11-10 v4）
+✅ 已实现（23 个入口 = 21 个 cli/*.ts + 2 个脚本）：doctor / analyze-coupling / triage-boundary / assess-conversion / extract-closure / pack-context / gen-golden / verify-fidelity / adapt-arkts / arkts-fix / ui-skeleton / diff-gate / explain-errors / lint-arkts / reachability-probe / port / build-hap / device-test / docs-metrics / mcp-server / case + `scripts/stage-case.mjs` / `scripts/acceptance.mjs`。
 所有入口 `--help` exit 0、未知参数 exit 2；port/doctor 已按 fail-closed 收口（空值/缺前置不放过）。
 
 ## 固定命令序列
@@ -76,9 +79,9 @@ node cli/reachability-probe.ts --project <harmony> [--src entry/src/main/ets] [-
 第二步不可省：入口可达只检查一部分文件，全量可达才看得到全部。**WARN 级 arkts-* 也算违规**（globalThis 实测 WARN）。lint 默认每次干净构建（清 .hvigor/cache 与模块 build，约 6-7s），门禁/CI 禁止 `--no-clean`；失败先跑第 8 步 explain-errors。
 ### 10 一键门禁（可选，推荐）
 ```bash
-node cli/port.ts --project <harmony> --src <src-root> --adapt-src <ts-dir> --adapted <ets-dir> --case <case-dir> --sdk <p> --hvigor <p> --stages all --report out/port-report.json [--json] [--continue]
+node cli/port.ts --project <harmony> --src <src-root> --adapt-src <ts-dir> --adapted <ets-dir> --case <case-dir> --sdk <p> --hvigor <p> --stages all [--autofix] [--no-autofix] [--arkts-fix-out <dir>] [--fidelity-key <k>] [--fidelity-items <items>] [--fidelity-field <field>] --report out/port-report.json [--json] [--continue]
 ```
-阶段顺序：analyze→adapt→diff→fidelity→lint→reach→build→device。**默认 strict**：adapt 残留（exit 3）→ FAIL；`--allow-residuals` 是唯一放行开关（需在报告中记录理由）。**device 可选**：`--device <ip:port>` 才启用；`--signed-hap <hap> --bundle <id> --ability EntryAbility` 做 install+launch+screenshot，无 signed-hap 只 check；默认 7 阶段不变。**diff 阶段是 WARN**：needs-review>0 只告警不阻断，`--strict-diff` 才把它当失败；报告 counts 含 warn。**lint/reach FAIL 自动跑 explain-errors**（`--no-explain` 关闭，`--explain-max` 默认 5），摘要直接给规则 + file:line。**device 失败即停**；截图写 `<logs>/device.jpeg`，metrics 含 check/install/launch/screenshot。
+阶段顺序：analyze→adapt→autofix→diff→fidelity→lint→reach→build→device。**默认 strict**：adapt 残留（exit 3）→ FAIL；`--allow-residuals` 是唯一放行开关（需在报告中记录理由）。**device 可选**：`--device <ip:port>` 才启用；`--signed-hap <hap> --bundle <id> --ability EntryAbility` 做 install+launch+screenshot，无 signed-hap 只 check；默认 7 阶段不变。**autofix 可选、默认关**：`--autofix` 才启用（需 `cli/arkts-fix.ts`），`--no-autofix` 显式关闭；只影响 diff（transforms>0 时 diff 用 fixed 目录），lint/reach/build 仍按 `--project`。**diff 阶段是 WARN**：needs-review>0 只告警不阻断，`--strict-diff` 才把它当失败；报告 counts 含 warn。**lint/reach FAIL 自动跑 explain-errors**（`--no-explain` 关闭，`--explain-max` 默认 5），摘要直接给规则 + file:line。**device 失败即停**；截图写 `<logs>/device.jpeg`，metrics 含 check/install/launch/screenshot。
 ### 11 构建
 ```bash
 node cli/build-hap.ts --project <harmony> [--mode debug|release] [--sdk <p>] [--hvigor <p>] [--log <path>]
@@ -112,7 +115,7 @@ node cli/device-test.ts --target <ip:port> --hap <signed.hap> --install --bundle
 - 不做：手工串命令、复读日志、逐条复制错误、重做 codemod 适配、UI 重写、真机验证、把 diff-gate 当语义证明。
 
 ## 环境与参考
-Node ≥22（实测 26.13.0）；`OHOS_BASE_SDK_HOME`、`HVIGOR_HOME` 见 README；规则 `rules/arkts-restrictions.md`、`rules/pitfalls.md`、`rules/api-mapping.md`；适配器 `adapters/README.md`；案例 `cases/legado/README.md`。
+Node ≥22（实测 26.13.0）；`OHOS_BASE_SDK_HOME`、`HVIGOR_HOME` 由环境提供；规则 `rules/arkts-restrictions.md`、`rules/pitfalls.md`、`rules/api-mapping.md`；适配器 `adapters/README.md`；案例 `cases/legado/README.md`。
 
 ## 新案例落盘清单（模板：`cases/legado`、`cases/js-ts`、`cases/js-ts-yoga`）
 1. 分诊：`node cli/analyze-coupling.ts --root <project> --lang <id> --json`（<15% 停）。

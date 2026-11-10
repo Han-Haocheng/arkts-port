@@ -13,9 +13,9 @@
  *   g4  adapt-arkts --ets（0 行文本变化）→ diff-gate（0 needs-review）
  *
  * 外部依赖（均不入库）：
- *   ARKTS_PORT_CASE_REFS  上游 refs 根（默认 $ARKTS_PORT_CASE_REFS）
- *   --sdk / OHOS_BASE_SDK_HOME     默认 $OHOS_BASE_SDK_HOME
- *   --hvigor / HVIGOR_HOME         默认 $HVIGOR_HOME
+ *   ARKTS_PORT_CASE_REFS  上游 refs 根（默认 /mnt/d/Project/legado-with-MD3/.refs）
+ *   --sdk / OHOS_BASE_SDK_HOME     默认 /mnt/d/Project/legado-with-MD3/.ohos-sdk/linux
+ *   --hvigor / HVIGOR_HOME         默认 /mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules
  *
  * 产物：out/js-ts/（gitignored）；退出码：0 = 请求的门禁全 PASS（上游缺失时 SKIP 也 exit 0）、1 = 有 FAIL、2 = 用法。
  */
@@ -29,8 +29,8 @@ import { refsRoot, resolveSource, upstreamRoot, SOURCE_REL, sourceCandidates } f
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const OUT = join(repoRoot, 'out', 'js-ts');
 const CASE = join(repoRoot, 'cases', 'js-ts');
-const DEFAULT_SDK = process.env.OHOS_BASE_SDK_HOME || '';
-const DEFAULT_HVIGOR = process.env.HVIGOR_HOME || '';
+const DEFAULT_SDK = '/mnt/d/Project/legado-with-MD3/.ohos-sdk/linux';
+const DEFAULT_HVIGOR = '/mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules';
 const GATES = ['g1', 'g2', 'g3', 'g4'];
 
 const USAGE = [

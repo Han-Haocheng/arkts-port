@@ -1,0 +1,18 @@
+# Third-party licenses
+
+This repository is licensed under the MIT License (see [LICENSE](LICENSE)).
+
+arkts-port does not bundle or commit third-party source code. Upstream projects
+referenced by the case studies stay outside this repository and remain under
+their own licenses.
+
+| Component | Upstream | License | Use in this repository | Distribution |
+| --- | --- | --- | --- | --- |
+| legado-with-MD3 (fork of gedoor/legado) | [HapeLee/legado-with-MD3](https://github.com/HapeLee/legado-with-MD3), based on [gedoor/legado](https://github.com/gedoor/legado) | GPL-3.0 | Upstream of the pagination algorithm exercised by `cases/legado` | Kotlin source and the derived TypeScript transcript are both external; neither is committed. |
+| yoga-layout | [facebook/yoga](https://github.com/facebook/yoga) (Meta) | MIT | Layout engine used by `cases/js-ts-yoga` | Source is copied from an external checkout into a git-ignored stage; not committed. |
+| dsh-TUI | [ccch1mneyyy/dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) | MIT | Origin of the TypeScript yoga port used by `cases/js-ts-yoga` | External dependency; not committed. |
+
+The harnesses, golden/actual data, and scripts under `cases/` are test artifacts
+of this repository and contain no upstream source code. Review the upstream
+licenses before redistributing anything derived from them. This repository does
+not relicense any third-party code.

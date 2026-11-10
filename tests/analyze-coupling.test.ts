@@ -203,3 +203,22 @@ test('jvm 回归：dts/dataOnly/unaudited 恒为 0，耦合口径与旧版一致
   assert.equal(json.autoConvertibleLoc, loc(logic));
   assert.equal(json.autoConvertiblePct, Math.round(loc(logic) * 1000 / (loc(android) + loc(logic))) / 10);
 });
+
+test('--help：列出 --json 的实际字段与取值（autoConvertiblePct/totalLoc/verdict/files 等）', () => {
+  const res = runAnalyze(['--help'], repoRoot);
+  assert.equal(res.code, 0, res.stderr);
+  const help = res.stdout;
+  // 参数
+  for (const flag of ['--root', '--lang', '--top', '--json', '--list-langs', '--help']) {
+    assert.ok(help.includes(flag), 'help 应包含参数 ' + flag);
+  }
+  // JSON 字段（实际形状）
+  for (const field of [
+    'root', 'languages', 'files', 'totalLoc', 'coupledFiles', 'coupledLoc',
+    'dts', 'dataOnly', 'unaudited', 'autoConvertibleLoc', 'autoConvertiblePct', 'verdict',
+    'perLanguage', 'topModules', 'largestPureFiles',
+  ]) {
+    assert.ok(help.includes(field), 'help 应包含 JSON 字段 ' + field);
+  }
+  assert.ok(help.includes('high') && help.includes('medium') && help.includes('low'), 'help 应说明 verdict 取值');
+});

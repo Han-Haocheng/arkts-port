@@ -2,7 +2,7 @@
 /**
  * diff-gate —— 适配「只动类型层」的告警门禁。
  *
- * 背景：adapt-arkts 的合法性建立在「只改类型层、不动运行时语句」上。
+ * 背景：adapt-arkts 的合法性建立在「只改类型层、不动运行时语句」上（docs/tooling-backlog.md A4）。
  * 这个工具把「reviewer 人工读 diff」变成确定性检查：按相对路径配对 before/after 的 .ts/.ets，
  * 做行级 diff（自实现 Myers，零依赖），把每个变更区域分类成
  *

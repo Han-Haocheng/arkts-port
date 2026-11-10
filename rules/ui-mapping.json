@@ -1,0 +1,195 @@
+{
+  "version": 3,
+  "sha256": "6b8c40946b8a8e23456ed578b21ef2ea5c1c9db7ae0da249eec83aca9f590209",
+  "shaScope": "sha256(JSON.stringify({version,components,containers,modifiers,safeRules,excludedRules,weightMap,alignMap,colorMap,reserved,rename,unmappedKnown,stubCosts,stubLinesPerComponent,manualRules}))",
+  "components": {
+    "Column": "Column",
+    "Row": "Row",
+    "Box": "Stack",
+    "Stack": "Stack",
+    "Scroll": "Scroll",
+    "List": "List",
+    "LazyColumn": "List",
+    "ListItem": "ListItem",
+    "Divider": "Divider",
+    "Spacer": "Blank",
+    "Text": "Text",
+    "AppText": "Text",
+    "Image": "Image",
+    "TextInput": "TextInput",
+    "AppTextField": "TextInput",
+    "TextArea": "TextArea",
+    "Toggle": "Toggle",
+    "AdaptiveSwitch": "Toggle",
+    "Button": "Button",
+    "FilledTonalIconButton": "Button",
+    "SmallPlainButton": "Button",
+    "TopBarActionButton": "Button",
+    "AppFloatingActionButton": "Button",
+    "AppScaffold": "Column",
+    "AppModalBottomSheet": "Column",
+    "SplicedColumnGroup": "Column",
+    "TopBar": "Row",
+    "AppTopBar": "Row"
+  },
+  "containers": [
+    "Column",
+    "Row",
+    "Stack",
+    "Scroll",
+    "List",
+    "ListItem",
+    "AppScaffold",
+    "AppModalBottomSheet",
+    "SplicedColumnGroup",
+    "TopBar",
+    "AppTopBar"
+  ],
+  "modifiers": {
+    "fillMaxWidth": "width('100%')",
+    "fillMaxSize": "width('100%').height('100%')",
+    "padding": "padding",
+    "width": "width",
+    "height": "height",
+    "weight": "layoutWeight",
+    "clickable": "onClick",
+    "onClick": "onClick",
+    "onChange": "onChange"
+  },
+  "safeRules": [
+    {
+      "id": "spacer",
+      "mapping": "Spacer→Blank",
+      "confidence": 0.9
+    },
+    {
+      "id": "size",
+      "mapping": "size/fillMaxSize/heightIn/widthIn(常量)→width/height/constraintSize",
+      "confidence": 0.85
+    },
+    {
+      "id": "text",
+      "mapping": "Text fontSize/fontColor(字面量)/fontWeight/textAlign",
+      "confidence": 0.9
+    },
+    {
+      "id": "verticalScroll",
+      "mapping": "verticalScroll(rememberScrollState())→Scroll{Column}",
+      "confidence": 0.8
+    },
+    {
+      "id": "state",
+      "mapping": "remember{mutableStateOf<Boolean/String/Int>}→@State",
+      "confidence": 0.7
+    },
+    {
+      "id": "onClick",
+      "mapping": "onClick→.onClick(TODO)",
+      "confidence": 0.9
+    },
+    {
+      "id": "lazyItems",
+      "mapping": "LazyColumn+简单 items→List/ForEach",
+      "confidence": 0.6
+    },
+    {
+      "id": "launchedEffect",
+      "mapping": "LaunchedEffect(Unit)→aboutToAppear TODO",
+      "confidence": 0.35
+    }
+  ],
+  "excludedRules": [
+    "stringResource→$r（需资产审计）",
+    "painterResource→$r（需资产审计）",
+    "主题/token",
+    "动画/手势/Canvas/自定义 Layout",
+    "Sheet/Dialog/WebView/AndroidView",
+    "ViewModel/导航"
+  ],
+  "weightMap": {
+    "Bold": "FontWeight.Bold",
+    "Medium": "FontWeight.Medium",
+    "SemiBold": "FontWeight.Medium",
+    "Normal": "FontWeight.Normal",
+    "Light": "FontWeight.Light"
+  },
+  "alignMap": {
+    "Center": "TextAlign.Center",
+    "Start": "TextAlign.Start",
+    "End": "TextAlign.End"
+  },
+  "colorMap": {
+    "Black": "#000000",
+    "White": "#FFFFFF",
+    "Gray": "#888888",
+    "Grey": "#888888",
+    "Red": "#FF0000",
+    "Transparent": "#00000000"
+  },
+  "reserved": [
+    "enabled",
+    "build",
+    "aboutToAppear",
+    "aboutToDisappear",
+    "onPageShow",
+    "onPageHide",
+    "onBackPress",
+    "onReuse",
+    "onRecycle"
+  ],
+  "rename": {
+    "enabled": "ruleEnabled"
+  },
+  "unmappedKnown": [
+    "TextCard",
+    "SettingItem",
+    "SettingItemWithDivider",
+    "SelectionItemCard",
+    "Icon",
+    "RoundDropdownMenu",
+    "RoundDropdownMenuItem",
+    "MarkdownSheet",
+    "CrashLogSheet",
+    "UpdateSheet",
+    "AppAlertDialog",
+    "AppCircularProgressIndicator",
+    "AppTabRow",
+    "HorizontalPager",
+    "ProvideAppDensity",
+    "AppIcons",
+    "Icons",
+    "KeyboardOptions"
+  ],
+  "stubCosts": {
+    "Icon": 4,
+    "SettingItem": 12,
+    "SettingItemWithDivider": 13,
+    "TextCard": 8,
+    "SelectionItemCard": 14,
+    "RoundDropdownMenu": 10,
+    "RoundDropdownMenuItem": 6,
+    "MarkdownSheet": 20,
+    "CrashLogSheet": 20,
+    "UpdateSheet": 20,
+    "AppAlertDialog": 18,
+    "AppCircularProgressIndicator": 8,
+    "AppTabRow": 14,
+    "HorizontalPager": 20,
+    "ProvideAppDensity": 3,
+    "AppIcons": 3,
+    "Icons": 3,
+    "KeyboardOptions": 3
+  },
+  "stubLinesPerComponent": 4,
+  "manualRules": [
+    "复合组件（Scaffold/TopAppBar/TextCard/SettingItem/SelectionItemCard/Sheet/Dialog/FAB/菜单）只生成近似占位，需人工补齐",
+    "主题 token / 资源 / 字符串 / 图标不迁移，统一静态化",
+    "Sheet/Dialog/动画/手势/滚动行为/平台 API 不生成",
+    "嵌套关系由花括号深度启发式推断，可能不准确（mapping 标不确定项）",
+    "未识别的大写调用不列入 unmapped，避免噪音",
+    "生成物未编译，必须再过 build-hap + reachability-probe 门禁",
+    "未映射组件自动生成 @Builder stub（Text 占位），stub 可编译但不是真实 UI",
+    "Box 映射为 ArkUI Stack（ArkUI 无 Box 组件）",
+    "safe rules 只覆盖无资源依赖子集；stringResource/painterResource 仍需资产审计"
+  ]
+}

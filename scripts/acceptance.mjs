@@ -32,7 +32,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_REFS = process.env.ARKTS_PORT_CASE_REFS || '';
+const DEFAULT_REFS = '/mnt/d/Project/legado-with-MD3/.refs';
 const DEFAULT_OUT = join('out', 'acceptance');
 const CASES_DIR = join(repoRoot, 'cases', 'legado');
 const STAGE_ORDER = ['stage', 'golden', 'replay', 'adapt', 'arkts-gate'];

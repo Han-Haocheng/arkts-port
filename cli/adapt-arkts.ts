@@ -48,7 +48,8 @@
  *                      "hint": "...", "snippet": "static key(element: { ... })" } ]
  *   }
  *
- * changes.rule:      constructor-options | copy-patch | type-rename | type-ref | map-interface | ets-import
+ * changes.rule:      constructor-options | copy-patch | type-rename | type-ref | map-interface | ets-import | extension-rename
+ *                    （extension-rename = 只改扩展名的文件：x.ts → x.ets，line 固定 1，文本未变）
  * residuals.code:    globalThis | as-unknown | any-unknown | indexed-type-access | inline-object-type |
  *                    unsupported-constructor | partial-remaining | as-const-unpaired |
  *                    name-conflict | crossfile-type-ref | map-keys-unsupported | rename-uncertain
@@ -72,6 +73,8 @@ const RULE_TYPE_RENAME = 'type-rename';
 const RULE_TYPE_REF = 'type-ref';
 const RULE_MAP = 'map-interface';
 const RULE_ETS_IMPORT = 'ets-import';
+/** 仅扩展名变化（--ets：x.ts → x.ets，文本未变）；保证 filesChanged 与 changes[] 能对上。 */
+const RULE_EXTENSION_RENAME = 'extension-rename';
 
 const RESIDUAL_HINTS: Record<string, string> = {
   globalThis: 'ArkTS 禁 globalThis；改成模块级变量 + 宿主注入（参见 cases/legado 的 ReaderPerformanceTimer 修法）',
@@ -98,7 +101,8 @@ const USAGE = [
   '参数：',
   '  --src <dir>            输入目录（递归扫描 .ts/.ets；跳过 node_modules 与 .git）',
   '  --out <dir>            输出目录（保留相对路径；src 永不被修改；不能等于或在 src 内）',
-  '  --ets                  输出 .ets，且相对 import 说明符去掉 .ts 后缀',
+  '  --ets                  输出 .ets，且相对 import 说明符去掉 .ts 后缀；只改扩展名的文件以',
+  '                         changes.rule=extension-rename 记录（保证 filesChanged 与 changes[] 一致）',
   '  --report <path.json>   把报告写成 JSON 文件',
   '  --json                 把报告打到 stdout（只有 JSON）',
   '  --fail-on-residual     存在 residual 时退出码 3',
@@ -1770,9 +1774,14 @@ function finalizeReport(files: FileState[]): { changes: ChangeRow[]; residuals: 
       });
     }
   }
-  changes.sort((a, b) => (a.file !== b.file ? (a.file < b.file ? -1 : 1) : a.line - b.line || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)));
+  sortChangeRows(changes);
   residuals.sort((a, b) => (a.file !== b.file ? (a.file < b.file ? -1 : 1) : a.line - b.line || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)));
   return { changes, residuals };
+}
+
+/** changes[] 的确定性排序（file → line → rule）；extension-rename 也走同一排序。 */
+function sortChangeRows(changes: ChangeRow[]): void {
+  changes.sort((a, b) => (a.file !== b.file ? (a.file < b.file ? -1 : 1) : a.line - b.line || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)));
 }
 
 function lineStartAtByLine(text: string, line: number): number {
@@ -1927,14 +1936,18 @@ function runAdapt(options: CliOptions): RunResult {
 
   // 先把全部产物算好再落盘：变换异常时不会写出半成品。
   const outputs: Array<{ rel: string; text: string; absolute: string }> = [];
-  let filesChanged = 0;
   for (const file of files) {
     let outRel = file.rel;
     if (options.ets && file.rel.endsWith('.ts')) outRel = file.rel.slice(0, file.rel.length - 3) + '.ets';
-    const changed = outRel !== file.rel || file.text !== file.originalText;
-    if (changed) filesChanged++;
+    if (outRel !== file.rel && file.text === file.originalText) {
+      // 只改扩展名（文本未变）：显式记一条，避免 summary.filesChanged 无法被 changes[] 解释
+      changes.push({ file: file.rel, line: 1, rule: RULE_EXTENSION_RENAME });
+    }
     outputs.push({ rel: outRel, text: file.text, absolute: join(outDir, outRel.split('/').join(sep)) });
   }
+  sortChangeRows(changes);
+  // filesChanged 与 changes[] 保持一致：按 changes 里的 distinct file 统计（含 extension-rename）
+  const filesChanged = new Set(changes.map((change) => change.file)).size;
 
   for (const output of outputs) {
     mkdirSync(dirname(output.absolute), { recursive: true });

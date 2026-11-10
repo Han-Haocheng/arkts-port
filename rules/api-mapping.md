@@ -1,5 +1,7 @@
 # Android → ArkTS API 映射
 
+[文档索引](../docs/README.md) · [English](api-mapping.en.md)
+
 只记录**已实测**的映射，没验证过的不写。
 
 ## 数据

@@ -2,7 +2,7 @@
 
 > **状态：已实现（2026-11-09，task-28）**。`harness/`、`replay.mjs`、`run.mjs`、`parity-fix.mjs`、`golden.json`、`actual.json` 已落盘；一条命令复跑与 G1-G4 证据见 §6。
 > 目标：验证 js-ts 适配器的**机制**（closure → golden → replay → 保真 → adapt-arkts → ArkTS 门禁），**不声称整模块迁移**。
-> 依据：`docs/js-ts-candidates.md`（task-23）§1/§3。上游模块：`<legado>/modules/web`（Vue3 + Element Plus Web SPA，GPL-3.0；本案例不复制其源码进仓库）。
+> 依据：`docs/js-ts-candidates.md`（task-23）§1/§3。上游模块：`/mnt/d/Project/legado-with-MD3/modules/web`（Vue3 + Element Plus Web SPA，GPL-3.0；本案例不复制其源码进仓库）。
 
 ## 0. 定位与结论
 
@@ -24,9 +24,9 @@
 
 上游路径（必须真实存在，缺失则本案例 SKIP 并说明）：
 
-- `<legado>/modules/web/src/utils/chapterProgress.ts`（9 行）
-- `<legado>/modules/web/src/utils/souce.ts`（75 行，可选）
-- `<legado>/modules/web/src/utils/utils.ts`（55 行，#2 的依赖）
+- `/mnt/d/Project/legado-with-MD3/modules/web/src/utils/chapterProgress.ts`（9 行）
+- `/mnt/d/Project/legado-with-MD3/modules/web/src/utils/souce.ts`（75 行，可选）
+- `/mnt/d/Project/legado-with-MD3/modules/web/src/utils/utils.ts`（55 行，#2 的依赖）
 
 ## 2. harness 设计
 
@@ -90,7 +90,7 @@
 ## 3. golden / actual 生成命令（已按此落盘并实测；日常复跑用 §6.2 的 `run.mjs`）
 
 ```bash
-UP=<legado>/modules/web
+UP=/mnt/d/Project/legado-with-MD3/modules/web
 mkdir -p out/js-ts
 
 # 0) 前置：上游存在（缺失则 SKIP）
@@ -130,7 +130,7 @@ node cli/gen-golden.ts --lang js-ts --main cases/js-ts/harness/souce.mjs \
 1. **准备 parity 工程**（不污染 `.refs`）：
    ```bash
    mkdir -p out/js-ts
-   cp -a <legado>/.refs/arkts-check out/js-ts/parity
+   cp -a /mnt/d/Project/legado-with-MD3/.refs/arkts-check out/js-ts/parity
    ```
    该工程是已验证 0 错误的 ArkTS 工程（entry 可达 45 模块 + 本案例 1 个 = 46）。
 2. **机械适配入口**：
@@ -143,8 +143,8 @@ node cli/gen-golden.ts --lang js-ts --main cases/js-ts/harness/souce.mjs \
 4. **ArkTS 门禁**（SDK/hvigor 用 legado 现成路径）：
    ```bash
    node cli/reachability-probe.ts --project out/js-ts/parity \
-     --sdk <legado>/.ohos-sdk/linux \
-     --hvigor <legado>/.ohos-tools/node_modules --json
+     --sdk /mnt/d/Project/legado-with-MD3/.ohos-sdk/linux \
+     --hvigor /mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules --json
    ```
    **期望（已实测基线）**：`probeModules: 46`、`arktsErrors: 1`、`warnArktsErrors: 0`，规则 `arkts-no-obj-literals-as-types`，定位 `parity/chapterProgress.ets:3:29`（内联对象类型 `ReadonlyArray<{start;endExclusive}>`）。
 5. **约定的人工类型修复（2 行，非运行时改动；已脚本化）**：`node cases/js-ts/parity-fix.mjs --in <parity 里的 chapterProgress.ets> --out <同文件>` 把内联对象类型抽成 `interface ParagraphRange { start: number; endExclusive: number }`，签名改为 `ReadonlyArray<ParagraphRange>`；重跑 probe → `arktsErrors: 0`、`warnArktsErrors: 0`（已实测）。脚本要求锚点恰好出现 1 次，否则 exit 1（不静默改坏）。
@@ -209,9 +209,9 @@ node cases/js-ts/run.mjs --stage g4            # G4（g3 依赖它）
 node cases/js-ts/run.mjs --stage g3            # G3（缺 adapt 时会先自动跑 g4）
 
 # 环境变量（默认值即 legado 检出；换机器时改这三个）
-export ARKTS_PORT_CASE_REFS=<legado>/.refs
-export OHOS_BASE_SDK_HOME=<legado>/.ohos-sdk/linux
-export HVIGOR_HOME=<legado>/.ohos-tools/node_modules
+export ARKTS_PORT_CASE_REFS=/mnt/d/Project/legado-with-MD3/.refs
+export OHOS_BASE_SDK_HOME=/mnt/d/Project/legado-with-MD3/.ohos-sdk/linux
+export HVIGOR_HOME=/mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules
 ```
 
 上游缺失时：`run.mjs` 打印 `SKIP:` 并 exit 0（不算失败）；`harness` 打印 SKIP 并 exit 3（gen-golden 会因此失败，不会产出假 golden）。
@@ -236,20 +236,20 @@ export HVIGOR_HOME=<legado>/.ohos-tools/node_modules
 
 ### 6.4 外部依赖与 GPL 边界
 
-- 上游是外部路径 `<legado>/modules/web`（GPL-3.0）：**不复制源码进仓库**；`lib/case-common.mjs` 按以下顺序定位：
+- 上游是外部路径 `/mnt/d/Project/legado-with-MD3/modules/web`（GPL-3.0）：**不复制源码进仓库**；`lib/case-common.mjs` 按以下顺序定位：
   1. `$ARKTS_PORT_CASE_REFS/js-ts/src/utils/chapterProgress.ts`（推荐：把上游 staged 到 refs）
   2. `$ARKTS_PORT_CASE_REFS/../modules/web/src/utils/chapterProgress.ts`（refs 的兄弟目录 = legado 检出；本次实测走这条）
   3. `ARKTS_PORT_CASE_SRC` 可显式覆盖单个文件（harness / replay 支持）
 - 若 refs 里没有 `js-ts/`，首次运行前手工 staging 一次即可（GPL 源留在 refs，仍不入库）：
   ```bash
   mkdir -p "$ARKTS_PORT_CASE_REFS/js-ts/src/utils"
-  cp <legado>/modules/web/src/utils/chapterProgress.ts "$ARKTS_PORT_CASE_REFS/js-ts/src/utils/"
+  cp /mnt/d/Project/legado-with-MD3/modules/web/src/utils/chapterProgress.ts "$ARKTS_PORT_CASE_REFS/js-ts/src/utils/"
   ```
 - SDK / hvigor 同样是外部依赖；`run.mjs` 默认值与 legado 检出一致，可用 `--sdk` / `--hvigor` 或环境变量覆盖。
 
 ## 7. 风险与边界
 
-- **上游是外部路径**（`<legado>/...`，GPL-3.0）：harness 通过路径引用，不复制源码进仓库；路径缺失时案例 SKIP。
+- **上游是外部路径**（`/mnt/d/Project/legado-with-MD3/...`，GPL-3.0）：harness 通过路径引用，不复制源码进仓库；路径缺失时案例 SKIP。
 - **`gen-golden` js-ts 使用工作区版本**：本案例实测依赖当前工作区的 `cli/gen-golden.ts`（`M`）；若 HEAD 复核时该修改未提交，G1 会 exit 2（用法/缺能力）。提交后本风险消失。
 - **上游解析顺序**：`$ARKTS_PORT_CASE_REFS/js-ts/...` 优先，其次 refs 的兄弟目录 `modules/web/...`（本次实测走这条）；两条都不存在时整个案例 SKIP（`run.mjs` exit 0、harness exit 3），不会产出假 golden。
 - **恒等转写**：本案例不验证「语义转写质量」，只验证「机制与门禁」；不要据此声称 js-ts 适配器已在大规模代码上验证（139 行 vs legado 2,898 行 = 4.8%，见 task-23）。

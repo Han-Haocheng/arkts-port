@@ -270,6 +270,30 @@ test('缺 harness（人类输出）：exit 4 且给出骨架路径与 TODO', (t)
   assert.ok(existsSync(join(fixture.out, 'Main.kt')));
 });
 
+test('--main 必须在 --src 内：src 内成功；src 外 exit 2 fail-fast，不写骨架/golden', (t) => {
+  const fixture = makeFixture(t, TOP_LEVEL_MAIN);
+  const toolchain = makeFakeToolchain(t);
+  const inside = runGen(baseArgs(fixture), fixture.root, fakeEnv(toolchain));
+  assert.equal(inside.code, 0, inside.stdout + inside.stderr);
+
+  const outsideMain = join(fixture.root, 'MainOutside.kt');
+  writeFileSync(outsideMain, TOP_LEVEL_MAIN, 'utf8');
+  const outsideOut = join(fixture.root, 'out-outside');
+  const outsideLogs = join(fixture.root, 'logs-outside');
+  const outside = runGen([
+    '--lang', 'jvm',
+    '--src', fixture.src,
+    '--main', outsideMain,
+    '--out', outsideOut,
+    '--logs', outsideLogs,
+  ], fixture.root, fakeEnv(toolchain));
+  assert.equal(outside.code, 2, outside.stdout + outside.stderr);
+  assert.match(outside.stderr, /--main 必须位于 --src 目录内/);
+  assert.match(outside.stderr, /找不到主类/);
+  assert.equal(existsSync(join(outsideOut, 'Main.kt')), false, '不得写骨架');
+  assert.equal(existsSync(join(outsideOut, 'golden.json')), false, '不得写 golden');
+});
+
 // ---------------------------------------------------------------------------
 // 成功路径 / 报告字段 / golden 字节
 // ---------------------------------------------------------------------------
@@ -715,4 +739,281 @@ test('js-ts 真实 node：3 行 harness 导入 .ts 纯逻辑并产出 golden', (
   }
   assert.equal(res.code, 0, res.stdout + res.stderr);
   assert.equal(readFileSync(join(out, 'golden.json'), 'utf8'), '[{"scenario":"s1","result":42}]\n');
+});
+
+
+// ---------------------------------------------------------------------------
+// manualExtractions：boundary 符号 → stub / 替换片段（jvm）
+// ---------------------------------------------------------------------------
+
+interface BoundaryFixture {
+  root: string;
+  src: string;
+  main: string;
+  out: string;
+  logs: string;
+  manualPath: string;
+}
+
+/** 假 kotlinc：按 FAKE_BOUNDARY_MODE 模拟 boundary 未解析/已被 stub/替换修复。 */
+function makeBoundaryToolchain(t: TestHooks): string {
+  const bin = join(makeTmp(t), 'bin');
+  mkdirSync(bin, { recursive: true });
+  const script = [
+    '#!/bin/sh',
+    'src="$1"',
+    'mode="$FAKE_BOUNDARY_MODE"',
+    'if [ "$mode" = "always-unresolved" ]; then',
+    '  echo "$src/app/Use.kt:3:20: error: unresolved reference \'AppLog\'." >&2',
+    '  echo "$src/app/Use.kt:4:24: error: unresolved reference \'BuildConfig\'." >&2',
+    '  exit 1',
+    'fi',
+    'if [ "$mode" = "partial" ]; then',
+    '  if [ ! -f "$src/stub/AppLog.kt" ]; then',
+    '    echo "$src/app/Use.kt:3:20: error: unresolved reference \'AppLog\'." >&2',
+    '  fi',
+    '  echo "$src/app/Use.kt:4:24: error: unresolved reference \'BuildConfig\'." >&2',
+    '  exit 1',
+    'fi',
+    'if [ "$mode" = "stub" ]; then',
+    '  if [ ! -f "$src/stub/AppLog.kt" ]; then',
+    '    echo "$src/app/Use.kt:3:20: error: unresolved reference \'AppLog\'." >&2',
+    '    exit 1',
+    '  fi',
+    '  exit 0',
+    'fi',
+    'if [ "$mode" = "replacement" ]; then',
+    '  if ! grep -q "val debug = false" "$src/app/Use.kt"; then',
+    '    echo "$src/app/Use.kt:4:24: error: unresolved reference \'BuildConfig\'." >&2',
+    '    exit 1',
+    '  fi',
+    '  exit 0',
+    'fi',
+    'exit 0',
+    '',
+  ].join('\n');
+  const kotlin = [
+    '#!/bin/sh',
+    'printf \'{"ok":1}\'',
+    '',
+  ].join('\n');
+  writeFileSync(join(bin, 'kotlinc'), script, 'utf8');
+  writeFileSync(join(bin, 'kotlin'), kotlin, 'utf8');
+  chmodSync(join(bin, 'kotlinc'), 0o755);
+  chmodSync(join(bin, 'kotlin'), 0o755);
+  return bin;
+}
+
+function makeBoundaryFixture(t: TestHooks): BoundaryFixture {
+  const root = makeTmp(t);
+  const src = join(root, 'src');
+  mkdirSync(join(src, 'app'), { recursive: true });
+  const main = join(src, 'Main.kt');
+  writeFileSync(main, 'package fixture\nfun main() { println("{}") }\n', 'utf8');
+  writeFileSync(join(src, 'app', 'Use.kt'), [
+    'package fixture.app',
+    'object Use {',
+    '  val log = AppLog',
+    '  val debug = BuildConfig.DEBUG',
+    '}',
+    '',
+  ].join('\n'), 'utf8');
+  return { root, src, main, out: join(root, 'out'), logs: join(root, 'logs'), manualPath: join(root, 'manual.json') };
+}
+
+function writeManual(path: string, value: unknown): void {
+  writeFileSync(path, JSON.stringify(value, null, 2) + '\n', 'utf8');
+}
+
+function boundaryArgs(fixture: BoundaryFixture): string[] {
+  return ['--lang', 'jvm', '--src', fixture.src, '--main', fixture.main,
+    '--out', fixture.out, '--logs', fixture.logs, '--json'];
+}
+
+test('manualExtractions stub：临时副本应用后编译通过，原 src 不被污染', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeBoundaryToolchain(t);
+  writeManual(fixture.manualPath, {
+    version: 1,
+    boundarySymbols: ['AppLog'],
+    stubs: [{ symbol: 'AppLog', path: 'stub/AppLog.kt', content: 'package fixture.stub\nobject AppLog\n' }],
+  });
+  const res = runGen([...boundaryArgs(fixture), '--manual-extractions', fixture.manualPath], fixture.root,
+    fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'stub' }));
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  const report = JSON.parse(res.stdout) as GenReport;
+  assert.equal(report.ok, true);
+  assert.equal(report.manualExtractions?.failClosed, false);
+  assert.equal(report.manualExtractions?.stubsApplied.length, 1);
+  assert.equal(report.manualExtractions?.stubsApplied[0].path, 'stub/AppLog.kt');
+  assert.ok(existsSync(join(fixture.out, '.src-manual', 'stub', 'AppLog.kt')));
+  assert.equal(existsSync(join(fixture.src, 'stub')), false, '原 --src 不得出现 stub');
+  assert.equal(readFileSync(join(fixture.src, 'app', 'Use.kt'), 'utf8').includes('AppLog'), true);
+  assert.ok(existsSync(join(fixture.out, 'golden.json')));
+  const log = readFileSync(logOf(fixture.root, report), 'utf8');
+  assert.match(log, /# manualExtractions/);
+  assert.match(log, /# stub {2}stub\/AppLog\.kt/);
+});
+
+test('manualExtractions replacements：替换片段应用到临时副本后编译通过', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeBoundaryToolchain(t);
+  writeManual(fixture.manualPath, {
+    version: 1,
+    replacements: [{ symbol: 'BuildConfig', file: 'app/Use.kt', find: 'BuildConfig.DEBUG', replace: 'false', count: 1 }],
+  });
+  const res = runGen([...boundaryArgs(fixture), '--manual-extractions', fixture.manualPath], fixture.root,
+    fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'replacement' }));
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  const report = JSON.parse(res.stdout) as GenReport;
+  assert.equal(report.manualExtractions?.replacementsApplied.length, 1);
+  assert.equal(report.manualExtractions?.replacementsApplied[0].occurrences, 1);
+  assert.match(readFileSync(join(fixture.out, '.src-manual', 'app', 'Use.kt'), 'utf8'), /val debug = false/);
+  assert.match(readFileSync(join(fixture.src, 'app', 'Use.kt'), 'utf8'), /BuildConfig\.DEBUG/);
+  assert.ok(existsSync(join(fixture.out, 'golden.json')));
+});
+
+test('manualExtractions 外部 stub 文件：复制进临时副本并编译通过', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeBoundaryToolchain(t);
+  const stubDir = join(fixture.root, 'stub-files');
+  mkdirSync(stubDir, { recursive: true });
+  writeFileSync(join(stubDir, 'AppLog.kt'), 'package fixture.stub\nobject AppLog\n', 'utf8');
+  writeManual(fixture.manualPath, {
+    version: 1,
+    stubs: [{ symbol: 'AppLog', path: 'stub/AppLog.kt', stub: 'stub-files/AppLog.kt' }],
+  });
+  const res = runGen([...boundaryArgs(fixture), '--manual-extractions', fixture.manualPath], fixture.root,
+    fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'stub' }));
+  assert.equal(res.code, 0, res.stdout + res.stderr);
+  const report = JSON.parse(res.stdout) as GenReport;
+  assert.equal(report.manualExtractions?.stubsApplied[0].source, 'file');
+});
+
+test('未解析引用 fail-closed：无 manual 也输出精确 file:line:col + symbol 清单', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeBoundaryToolchain(t);
+  const res = runGen(boundaryArgs(fixture), fixture.root, fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'always-unresolved' }));
+  assert.equal(res.code, 1, res.stdout + res.stderr);
+  const report = JSON.parse(res.stdout) as GenReport;
+  assert.equal(report.stage, 'compile');
+  assert.equal(report.unresolvedReferences?.length, 2);
+  const first = report.unresolvedReferences?.[0];
+  assert.equal(first?.file, 'app/Use.kt');
+  assert.equal(first?.line, 3);
+  assert.equal(first?.column, 20);
+  assert.equal(first?.symbol, 'AppLog');
+  assert.equal(report.unresolvedReferences?.[1].symbol, 'BuildConfig');
+  assert.equal(existsSync(join(fixture.out, 'golden.json')), false);
+  assert.match(report.message, /fail-closed/);
+  const human = runGen(boundaryArgs(fixture).slice(0, -1), fixture.root, fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'always-unresolved' }));
+  assert.equal(human.code, 1);
+  assert.match(human.stdout, /fail-closed/);
+  assert.match(human.stdout, /unresolvedReferences/);
+  assert.equal(existsSync(join(fixture.out, 'golden.json')), false);
+});
+
+test('manualExtractions 部分覆盖：剩余引用仍 fail-closed 并保留精确清单', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeBoundaryToolchain(t);
+  writeManual(fixture.manualPath, {
+    version: 1,
+    stubs: [{ symbol: 'AppLog', path: 'stub/AppLog.kt', content: 'package fixture.stub\nobject AppLog\n' }],
+  });
+  const res = runGen([...boundaryArgs(fixture), '--manual-extractions', fixture.manualPath], fixture.root,
+    fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'partial' }));
+  assert.equal(res.code, 1, res.stdout + res.stderr);
+  const report = JSON.parse(res.stdout) as GenReport;
+  assert.equal(report.manualExtractions?.stubsApplied.length, 1);
+  assert.equal(report.manualExtractions?.failClosed, true);
+  assert.equal(report.manualExtractions?.unresolved.length, 1);
+  assert.equal(report.manualExtractions?.unresolved[0].symbol, 'BuildConfig');
+  assert.equal(existsSync(join(fixture.out, 'golden.json')), false);
+});
+
+test('manualExtractions 配置错误：缺失/坏 JSON/未知字段/越界/覆盖源码/重复路径/未命中 → exit 2', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeBoundaryToolchain(t);
+  const base = [...boundaryArgs(fixture), '--manual-extractions'];
+  const cases: Array<{ label: string; setup: () => string; match: RegExp }> = [
+    {
+      label: '文件不存在',
+      setup: () => join(fixture.root, 'missing.json'),
+      match: /文件不存在/,
+    },
+    {
+      label: '坏 JSON',
+      setup: () => {
+        const path = join(fixture.root, 'bad.json');
+        writeFileSync(path, '{oops', 'utf8');
+        return path;
+      },
+      match: /不是合法 JSON/,
+    },
+    {
+      label: '未知字段',
+      setup: () => {
+        writeManual(fixture.manualPath, { version: 1, mystery: true });
+        return fixture.manualPath;
+      },
+      match: /未知字段：mystery/,
+    },
+    {
+      label: 'stub 路径越界',
+      setup: () => {
+        writeManual(fixture.manualPath, { version: 1, stubs: [{ path: '../evil.kt', content: 'x' }] });
+        return fixture.manualPath;
+      },
+      match: /越界/,
+    },
+    {
+      label: 'stub 覆盖已有源码',
+      setup: () => {
+        writeManual(fixture.manualPath, { version: 1, stubs: [{ path: 'app/Use.kt', content: 'x' }] });
+        return fixture.manualPath;
+      },
+      match: /冲突/,
+    },
+    {
+      label: '重复 stub 路径',
+      setup: () => {
+        writeManual(fixture.manualPath, {
+          version: 1,
+          stubs: [{ path: 'stub/A.kt', content: 'x' }, { path: 'stub/A.kt', content: 'y' }],
+        });
+        return fixture.manualPath;
+      },
+      match: /重复 stub 路径/,
+    },
+    {
+      label: 'replace 未命中',
+      setup: () => {
+        writeManual(fixture.manualPath, {
+          version: 1,
+          replacements: [{ file: 'app/Use.kt', find: 'NoSuchToken', replace: 'x' }],
+        });
+        return fixture.manualPath;
+      },
+      match: /未命中/,
+    },
+  ];
+  for (const item of cases) {
+    const path = item.setup();
+    const res = runGen([...base, path], fixture.root, fakeEnv(toolchain, { FAKE_BOUNDARY_MODE: 'stub' }));
+    assert.equal(res.code, 2, item.label + ' 应 exit 2：' + res.stdout + res.stderr);
+    assert.match(res.stderr, item.match, item.label);
+    assert.equal(existsSync(join(fixture.out, 'golden.json')), false, item.label + ' 不得写 golden');
+  }
+});
+
+test('--manual-extractions 仅 jvm：js-ts 传该参数 exit 2', (t) => {
+  const fixture = makeBoundaryFixture(t);
+  const toolchain = makeFakeToolchain(t);
+  const harness = join(fixture.root, 'harness.mjs');
+  writeFileSync(harness, 'console.log("ok")\n', 'utf8');
+  writeManual(fixture.manualPath, { version: 1, stubs: [] });
+  const res = runGen(['--lang', 'js-ts', '--main', harness, '--out', fixture.out, '--logs', fixture.logs,
+    '--manual-extractions', fixture.manualPath], fixture.root, fakeEnv(toolchain));
+  assert.equal(res.code, 2);
+  assert.match(res.stderr, /仅 --lang jvm 支持/);
 });

@@ -1,5 +1,7 @@
 # ArkTS 严格模式限制清单
 
+[文档索引](../docs/README.md) · [English](arkts-restrictions.en.md)
+
 ## ⚠️ 先看这条：ArkTS 只检查「从 entry 可达」的模块
 
 直接构建只会检查 entry 能 import 到的文件。实测：22 个模块里，入口只引到 7 个，

@@ -1,5 +1,7 @@
 # 踩坑清单
 
+[文档索引](../docs/README.md) · [English](pitfalls.en.md)
+
 ## 构建工具链（Linux 无 DevEco）
 
 | 现象 | 原因 | 处理 |

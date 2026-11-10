@@ -10,7 +10,7 @@
  *   node cases/js-ts-yoga/stage.mjs [--src <dir>] [--out <dir>] [--json]
  *   node cases/js-ts-yoga/stage.mjs --check [--json]     # 校验已 staged 文件（sha256 + 预处理）
  *
- * --src 默认 $ARKTS_PORT_YOGA_SRC（或 ARKTS_PORT_YOGA_SRC）。
+ * --src 默认 /mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout（或 ARKTS_PORT_YOGA_SRC）。
  * 退出码：0 成功；1 --check 不一致；2 用法错误；3 上游缺失（SKIP，不算失败）。
  */
 import { createHash } from 'node:crypto';
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const OUT_ROOT = resolve(repoRoot, 'out', 'js-ts-yoga');
-const DEFAULT_SRC = process.env.ARKTS_PORT_YOGA_SRC || '';
+const DEFAULT_SRC = '/mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout';
 const FILES = ['index.ts', 'enums.ts'];
 const REWRITE = { path: 'index.ts', from: "from './enums.js'", to: "from './enums.ts'" };
 
@@ -33,7 +33,7 @@ const USAGE = [
   '并把 index.ts 的 ./enums.js 说明符改成 ./enums.ts（1 处，必须恰好 1 处）。',
   '--check 按 out/js-ts-yoga/stage.json 校验 sha256 与预处理是否与 staged 文件一致。',
   '',
-  '上游：$ARKTS_PORT_YOGA_SRC（MIT；或 ARKTS_PORT_YOGA_SRC）',
+  '上游：/mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout（MIT；或 ARKTS_PORT_YOGA_SRC）',
   '退出码：0 成功；1 --check 不一致；2 用法错误；3 上游缺失（SKIP）',
 ].join('\n');
 

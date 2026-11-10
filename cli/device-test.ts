@@ -789,7 +789,7 @@ function main(): void {
   const checkOnly = raw.check === true;
 
   const target = optional(raw, 'target');
-  if (target === null) failUsage('缺少 --target（真机地址，如 192.0.2.10:40135）');
+  if (target === null) failUsage('缺少 --target（真机地址，如 10.42.0.48:40135）');
   const installRequested = raw.install === true;
   const hapArg = optional(raw, 'hap');
   if (installRequested && hapArg === null) failUsage('--install 需要 --hap <path>');

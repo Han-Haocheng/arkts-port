@@ -1,5 +1,7 @@
 # 语言适配器
 
+[文档索引](../docs/README.md) · [English](README.en.md)
+
 流水线的**阶段是语言无关的**，变的是三个钩子：
 
 | 钩子 | 作用 | 谁提供 |
@@ -19,7 +21,7 @@
 
 | 语言 | 可执行出 golden | 语义转写 | 状态 | 说明 |
 |---|---|---|---|---|
-| **Kotlin / Java（JVM）** | ✅ kotlinc / javac | Kotlin → TS | ✅ **已验证** | legado 案例：2,900 行 → 100% 保真 |
+| **Kotlin / Java（JVM）** | ✅ kotlinc / javac | Kotlin → TS | ✅ **已验证** | legado 案例：2,898 行 → 100% 保真 |
 | **JavaScript / TypeScript** | ✅ node | 可跳过 | ⬜ 待接入 | ArkTS 是 TS 超集，只需过适配阶段，成本最低 |
 | **Dart（Flutter）** | ✅ dart | Dart → TS | ⬜ 待接入 | 整包迁移优先用 flutter_flutter 重编 |
 | **C / C++（NDK）** | ✅ clang | C → TS | ⚠️ 受限 | 只建议纯算法库；有源码应改用 OHOS NDK |

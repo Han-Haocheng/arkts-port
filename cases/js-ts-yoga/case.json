@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "js-ts-yoga",
+  "title": "yoga-layout js-ts 规模化案例（4 场景 / 44 items）",
+  "lang": "js-ts",
+  "mode": "runner",
+  "upstream": {
+    "paths": [
+      "/mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout"
+    ],
+    "license": "MIT",
+    "inRepo": false,
+    "note": "上游外部依赖；缺失时所有 gate SKIP → exit 3（或 $ARKTS_PORT_YOGA_SRC 覆盖）"
+  },
+  "external": {
+    "refsEnv": "ARKTS_PORT_CASE_REFS",
+    "refsDefault": "/mnt/d/Project/legado-with-MD3/.refs"
+  },
+  "defaults": {
+    "sdkEnv": "OHOS_BASE_SDK_HOME",
+    "hvigorEnv": "HVIGOR_HOME",
+    "deviceEnv": "ARKTS_PORT_DEVICE"
+  },
+  "runner": {
+    "cmd": [
+      "node",
+      "cases/js-ts-yoga/run.mjs"
+    ],
+    "jsonFlag": "--json",
+    "stageFlag": "--stage",
+    "updateFlag": "--update",
+    "stages": [
+      "g1",
+      "g2",
+      "g3",
+      "g4"
+    ],
+    "passthrough": [
+      "--sdk",
+      "--hvigor",
+      "--update",
+      "--no-fix",
+      "--g3-record",
+      "--restage"
+    ],
+    "evidence": "out/js-ts-yoga/evidence.json"
+  },
+  "expected": {
+    "goldenSha256": "5a6d67ac7364d47b660efda0f0dabf8364e69903e5471d22f41505a42c1a59ea",
+    "scenarios": 4,
+    "items": 44,
+    "note": "仅展示；断言以 run.mjs 退出码与 evidence.pass 为准"
+  }
+}

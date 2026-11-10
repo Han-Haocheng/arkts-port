@@ -55,7 +55,8 @@ const NODE_HARNESS_SKELETON = [
 const USAGE = [
   '用法：',
   '  JVM：   node cli/gen-golden.ts --lang jvm --src <dir> --main <Main.kt> [--package <pkg>]',
-  '          [--out <dir>] [--json] [--report <path.json>]',
+  '          [--manual-extractions <json>] [--out <dir>] [--json] [--report <path.json>]',
+  '          （--main 必须位于 --src 目录内；否则主类会落在编译目录之外，运行时报“找不到主类”）',
   '  JS/TS： node cli/gen-golden.ts --lang js-ts --main <harness.mjs|.js>',
   '          [--out <dir>] [--json] [--report <path.json>] [--logs <dir>]',
   '          （.mjs 是 ESM；.js 按最近 package.json 的 type 判定，CommonJS/ESM 均可）',
@@ -79,6 +80,9 @@ const USAGE = [
   '退出码：0 = 成功且两次一致；1 = 编译/运行失败；2 = 用法错误；3 = 输出不稳定；4 = 缺 harness',
   '',
   '可选扩展：',
+  '  --manual-extractions <json>  jvm：把闭包 boundary 符号映射到 stub 文件/替换片段；',
+  '                    gen-golden 先复制 <src> 到 <out>/.src-manual，应用后编译；',
+  '                    未解析引用 fail-closed（不写 golden，列出 file:line:col + symbol）',
   '  --logs <dir>      日志目录（默认 <cwd>/out/logs）',
   '  --timeout <ms>    单次子进程超时，0 = 不超时（默认 0）',
   '  --help, -h        显示本帮助',
@@ -108,7 +112,7 @@ interface WarningRecord {
   count: number;
 }
 
-const VALUE_OPTS = new Set(['lang', 'src', 'main', 'package', 'out', 'report', 'logs', 'timeout']);
+const VALUE_OPTS = new Set(['lang', 'src', 'main', 'package', 'manual-extractions', 'out', 'report', 'logs', 'timeout']);
 const BOOL_OPTS = new Set(['json', 'help']);
 
 // ---------------------------------------------------------------------------
@@ -245,6 +249,228 @@ function countKtFiles(dir: string): number {
     // 计数只用于摘要，失败不致命
   }
   return count;
+}
+
+
+// ---------------------------------------------------------------------------
+// manualExtractions：boundary 符号 → stub / 替换片段（只做机械应用，不猜语义）
+// ---------------------------------------------------------------------------
+
+interface LoadedManualExtractions {
+  pathAbs: string;
+  dirAbs: string;
+  input: ManualExtractionsInput;
+}
+
+function loadManualExtractions(raw: RawCli, cwd: string): LoadedManualExtractions | null {
+  const arg = optional(raw, 'manual-extractions');
+  if (arg === null) return null;
+  const pathAbs = resolve(cwd, arg);
+  if (!isFile(pathAbs)) failUsage('--manual-extractions 文件不存在：' + arg);
+  let text = '';
+  try {
+    text = readFileSync(pathAbs, 'utf8');
+  } catch (error) {
+    failUsage('无法读取 --manual-extractions：' + arg + '（' + errorMessage(error) + '）');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    failUsage('--manual-extractions 不是合法 JSON：' + arg + '（' + errorMessage(error) + '）');
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    failUsage('--manual-extractions 顶层必须是对象');
+  }
+  const input = parsed as Record<string, unknown>;
+  const allowed = new Set(['version', 'boundarySymbols', 'stubs', 'replacements']);
+  for (const key of Object.keys(input)) {
+    if (!allowed.has(key)) failUsage('--manual-extractions 未知字段：' + key + '（支持 version/boundarySymbols/stubs/replacements）');
+  }
+  if (input.version !== undefined && input.version !== 1) {
+    failUsage('--manual-extractions.version 只支持 1（收到 ' + String(input.version) + '）');
+  }
+  if (input.boundarySymbols !== undefined) {
+    if (!Array.isArray(input.boundarySymbols) || input.boundarySymbols.some((item) => typeof item !== 'string' || item === '')) {
+      failUsage('--manual-extractions.boundarySymbols 必须是非空字符串数组');
+    }
+  }
+  if (input.stubs !== undefined && !Array.isArray(input.stubs)) failUsage('--manual-extractions.stubs 必须是数组');
+  if (input.replacements !== undefined && !Array.isArray(input.replacements)) failUsage('--manual-extractions.replacements 必须是数组');
+  return {
+    pathAbs,
+    dirAbs: dirname(pathAbs),
+    input: input as ManualExtractionsInput,
+  };
+}
+
+function resolveStubRelPath(srcAbs: string, rel: string, label: string): string {
+  if (typeof rel !== 'string' || rel.trim() === '') failUsage(label + ' 的 path/file 不能为空');
+  if (rel.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rel) || rel.includes('\\')) {
+    failUsage(label + ' 必须是相对 --src 的路径（不能绝对/反斜杠）：' + rel);
+  }
+  const abs = resolve(srcAbs, rel);
+  if (abs === srcAbs || !isWithin(abs, srcAbs)) {
+    failUsage(label + ' 越界（必须位于 --src 内）：' + rel);
+  }
+  return abs;
+}
+
+function copyTree(fromAbs: string, toAbs: string): void {
+  rmSync(toAbs, { recursive: true, force: true });
+  mkdirSync(toAbs, { recursive: true });
+  for (const entry of readdirSync(fromAbs, { withFileTypes: true })) {
+    const from = join(fromAbs, entry.name);
+    const to = join(toAbs, entry.name);
+    if (entry.isDirectory()) copyTree(from, to);
+    else if (entry.isFile()) copyFileSync(from, to);
+  }
+}
+
+function prepareManualExtractions(
+  loaded: LoadedManualExtractions,
+  raw: RawCli,
+  cwd: string,
+  srcAbs: string,
+  outAbs: string,
+  log: LogWriter,
+): { workSrc: string; report: ManualExtractionsReport } {
+  const workSrc = join(outAbs, '.src-manual');
+  copyTree(srcAbs, workSrc);
+
+  const stubs = loaded.input.stubs ?? [];
+  const replacements = loaded.input.replacements ?? [];
+  const stubDestinations = new Set<string>();
+  const stubsApplied: ManualExtractionsReport['stubsApplied'] = [];
+  for (let index = 0; index < stubs.length; index++) {
+    const item = stubs[index] as unknown as Record<string, unknown>;
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      failUsage('--manual-extractions.stubs[' + index + '] 必须是对象');
+    }
+    const symbol = item.symbol === undefined ? null : String(item.symbol);
+    const rel = String(item.path ?? '');
+    const hasContent = typeof item.content === 'string';
+    const hasStub = typeof item.stub === 'string' && item.stub !== '';
+    if (hasContent === hasStub) {
+      failUsage('--manual-extractions.stubs[' + index + '] 必须二选一：content（内联）或 stub（外部文件）');
+    }
+    const dest = resolveStubRelPath(srcAbs, rel, 'stubs[' + index + ']');
+    if (stubDestinations.has(dest)) failUsage('--manual-extractions 存在重复 stub 路径：' + rel);
+    stubDestinations.add(dest);
+    if (isFile(dest)) failUsage('stub 路径与 --src 已有文件冲突（拒绝覆盖真实源码）：' + rel);
+    let content: string;
+    if (hasContent) {
+      content = String(item.content);
+    } else {
+      const stubSource = resolve(loaded.dirAbs, String(item.stub));
+      try {
+        content = readFileSync(stubSource, 'utf8');
+      } catch (error) {
+        failUsage('stubs[' + index + '] 外部 stub 无法读取：' + stubSource + '（' + errorMessage(error) + '）');
+      }
+    }
+    mkdirSync(dirname(join(workSrc, rel)), { recursive: true });
+    writeFileSync(join(workSrc, rel), content, 'utf8');
+    stubsApplied.push({ symbol, path: rel, source: hasContent ? 'inline' : 'file' });
+  }
+
+  const replacementsApplied: ManualExtractionsReport['replacementsApplied'] = [];
+  for (let index = 0; index < replacements.length; index++) {
+    const item = replacements[index] as unknown as Record<string, unknown>;
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      failUsage('--manual-extractions.replacements[' + index + '] 必须是对象');
+    }
+    const symbol = item.symbol === undefined ? null : String(item.symbol);
+    const rel = String(item.file ?? '');
+    const find = item.find;
+    const replace = item.replace;
+    if (typeof find !== 'string' || find === '') {
+      failUsage('--manual-extractions.replacements[' + index + '].find 必须是非空字符串');
+    }
+    if (typeof replace !== 'string') {
+      failUsage('--manual-extractions.replacements[' + index + '].replace 必须是字符串');
+    }
+    resolveStubRelPath(srcAbs, rel, 'replacements[' + index + ']');
+    const workFile = join(workSrc, rel);
+    if (!isFile(workFile)) failUsage('replacements[' + index + '] 目标文件不存在（含应用 stub 后）：' + rel);
+    const before = readFileSync(workFile, 'utf8');
+    const parts = before.split(find);
+    const occurrences = parts.length - 1;
+    if (occurrences === 0) failUsage('replacements[' + index + '].find 在 ' + rel + ' 中未命中（拒绝静默跳过）：' + find);
+    if (item.count !== undefined) {
+      if (!Number.isInteger(item.count) || Number(item.count) <= 0) {
+        failUsage('replacements[' + index + '].count 必须是正整数');
+      }
+      if (Number(item.count) !== occurrences) {
+        failUsage('replacements[' + index + '] 命中次数与 count 不一致：期望 ' + String(item.count) + '，实际 ' + occurrences);
+      }
+    }
+    writeFileSync(workFile, parts.join(replace), 'utf8');
+    replacementsApplied.push({ symbol, file: rel, occurrences });
+  }
+
+  const boundarySymbols = [...new Set(loaded.input.boundarySymbols ?? [])];
+  const report: ManualExtractionsReport = {
+    path: relPath(cwd, loaded.pathAbs),
+    boundarySymbols,
+    stubsApplied,
+    replacementsApplied,
+    workSrc: relPath(cwd, workSrc),
+    failClosed: false,
+    unresolved: [],
+    unresolvedBySymbol: [],
+    note: 'manualExtractions 已应用到临时副本后编译；未解析引用会 fail-closed（不写 golden）。',
+  };
+  log.append('\n# manualExtractions\n# 文件: ' + report.path + '\n# 临时副本: ' + workSrc +
+    '\n# stubs: ' + stubsApplied.length + '；replacements: ' + replacementsApplied.length +
+    '；boundarySymbols: ' + boundarySymbols.length + '\n');
+  for (const action of stubsApplied) log.append('# stub  ' + action.path + (action.symbol === null ? '' : '  ← ' + action.symbol) + '\n');
+  for (const action of replacementsApplied) {
+    log.append('# replace  ' + action.file + '（' + action.occurrences + ' 处）' +
+      (action.symbol === null ? '' : '  ← ' + action.symbol) + '\n');
+  }
+  return { workSrc, report };
+}
+
+function parseUnresolvedReferences(
+  output: string,
+  compileRootAbs: string,
+  srcAbs: string,
+): UnresolvedReference[] {
+  const result: UnresolvedReference[] = [];
+  const seen = new Set<string>();
+  const matcher = /^(.*?):(\d+):(\d+): error: (.*unresolved reference.*)$/i;
+  for (const line of output.split('\n')) {
+    const match = matcher.exec(line.trim());
+    if (match === null) continue;
+    const rawFile = match[1];
+    const abs = rawFile.startsWith('/') ? rawFile : resolve(compileRootAbs, rawFile);
+    let file = rawFile;
+    if (isWithin(abs, srcAbs)) file = relative(srcAbs, abs);
+    else if (isWithin(abs, compileRootAbs)) file = relative(compileRootAbs, abs);
+    const message = match[4].trim();
+    const symbolMatch = /unresolved reference:?\s*['"]([^'"]+)['"]|unresolved reference:?\s*([^\s.]+)/i.exec(message);
+    const symbol = symbolMatch === null ? '(unknown)' : (symbolMatch[1] ?? symbolMatch[2] ?? '(unknown)');
+    const key = file + '\0' + match[2] + '\0' + match[3] + '\0' + symbol;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      file,
+      line: Number(match[2]),
+      column: Number(match[3]),
+      symbol,
+      message,
+    });
+  }
+  return result;
+}
+
+function groupUnresolved(references: UnresolvedReference[]): Array<{ symbol: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const entry of references) counts.set(entry.symbol, (counts.get(entry.symbol) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .map(([symbol, count]) => ({ symbol, count }));
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +620,52 @@ interface RunPayload {
   skeletonSource?: string;
   runDurations?: number[];
   nodeVersion?: string | null;
+  /** jvm 编译失败时的未解析引用（精确到 file:line:col + symbol）；成功时为空数组 */
+  unresolvedReferences?: UnresolvedReference[];
+  /** 使用 --manual-extractions 时：应用清单 + fail-closed 结果 */
+  manualExtractions?: ManualExtractionsReport | null;
+}
+
+interface UnresolvedReference {
+  file: string;
+  line: number;
+  column: number;
+  symbol: string;
+  message: string;
+}
+
+interface ManualExtractionStub {
+  symbol?: string;
+  path: string;
+  content?: string;
+  stub?: string;
+}
+
+interface ManualExtractionReplacement {
+  symbol?: string;
+  file: string;
+  find: string;
+  replace: string;
+  count?: number;
+}
+
+interface ManualExtractionsInput {
+  version?: number;
+  boundarySymbols?: string[];
+  stubs?: ManualExtractionStub[];
+  replacements?: ManualExtractionReplacement[];
+}
+
+interface ManualExtractionsReport {
+  path: string | null;
+  boundarySymbols: string[];
+  stubsApplied: Array<{ symbol: string | null; path: string; source: 'inline' | 'file' }>;
+  replacementsApplied: Array<{ symbol: string | null; file: string; occurrences: number }>;
+  workSrc: string | null;
+  failClosed: boolean;
+  unresolved: UnresolvedReference[];
+  unresolvedBySymbol: Array<{ symbol: string; count: number }>;
+  note: string;
 }
 
 function emit(payload: RunPayload, raw: RawCli, cwd: string, humanLines: string[]): never {
@@ -509,8 +781,32 @@ function runJvm(raw: RawCli, cwd: string, timeoutMs: number): void {
     ]);
   }
 
+  // ---- --main 必须在 --src 内：否则 kotlinc 只编 --src，主类在编译目录外 → 运行期“找不到主类”，提示误导 ----
+  if (!isWithin(mainAbs, srcAbs)) {
+    failUsage('--main 必须位于 --src 目录内：--main=' + relPath(cwd, mainAbs) +
+      '，--src=' + srcArg + '；--main 在 --src 外时不会被打包/编译，运行时会报“找不到主类”');
+  }
+
+  const log = createLog(logAbs);
+
+  // ---- manualExtractions：先复制到 <out>/.src-manual，应用 stub/替换后再编译 ----
+  const manualLoaded = loadManualExtractions(raw, cwd);
+  let compileSrcAbs = srcAbs;
+  let manualReport: ManualExtractionsReport | null = null;
+  if (manualLoaded !== null) {
+    let prepared: { workSrc: string; report: ManualExtractionsReport };
+    try {
+      prepared = prepareManualExtractions(manualLoaded, raw, cwd, srcAbs, outAbs, log);
+    } catch (error) {
+      failUsage('应用 --manual-extractions 失败：' + errorMessage(error));
+    }
+    compileSrcAbs = prepared.workSrc;
+    manualReport = prepared.report;
+  }
+  const mainAbsForCompile = manualLoaded === null ? mainAbs : join(compileSrcAbs, relative(srcAbs, mainAbs));
+
   // ---- package 与主类名 ----
-  const mainSource = readFileSync(mainAbs, 'utf8');
+  const mainSource = readFileSync(mainAbsForCompile, 'utf8');
   const mainFileBase = basename(mainAbs, extname(mainAbs));
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(mainFileBase)) {
     failUsage('--main 文件名必须是合法 Kotlin 标识符（决定主类名）：' + basename(mainAbs));
@@ -520,16 +816,14 @@ function runJvm(raw: RawCli, cwd: string, timeoutMs: number): void {
   if (!isValidPackage(pkg)) failUsage('无法解析 package：' + pkg);
   let mainClass = detectMainClass(mainFileBase, mainSource, classesAbs, pkg);
 
-  const log = createLog(logAbs);
-
   // ---- 清理上次产物，避免旧 golden 冒充新结果 ----
   rmSync(classesAbs, { recursive: true, force: true });
   rmSync(goldenAbs, { force: true });
   mkdirSync(classesAbs, { recursive: true });
 
   // ---- 编译 ----
-  const compile = runChild('kotlinc', [srcAbs, '-d', classesAbs], cwd, timeoutMs);
-  log.append('# 源码: ' + srcAbs + '\n');
+  const compile = runChild('kotlinc', [compileSrcAbs, '-d', classesAbs], cwd, timeoutMs);
+  log.append('# 源码: ' + compileSrcAbs + (manualLoaded === null ? '' : '（manualExtractions 临时副本）') + '\n');
   logChild(log, '编译（kotlinc）', compile);
 
   // 编译后用 .class 复核主类名（源码启发式只作兜底）
@@ -537,22 +831,49 @@ function runJvm(raw: RawCli, cwd: string, timeoutMs: number): void {
   const runTarget = pkg === '' ? mainClass : pkg + '.' + mainClass;
 
   if (compile.spawnError !== null || compile.exitCode !== 0) {
+    const compileOutput = compile.stderr.toString('utf8') + '\n' + compile.stdout.toString('utf8');
+    const unresolved = parseUnresolvedReferences(compileOutput, compileSrcAbs, srcAbs);
+    const unresolvedBySymbol = groupUnresolved(unresolved);
+    if (manualReport !== null) {
+      manualReport.failClosed = true;
+      manualReport.unresolved = unresolved;
+      manualReport.unresolvedBySymbol = unresolvedBySymbol;
+      manualReport.note = '编译失败：fail-closed，不写 golden；未解析引用见 unresolved（file:line:col + symbol）。';
+    }
+    if (unresolved.length > 0) {
+      log.append('\n# 未解析引用（fail-closed）: ' + unresolved.length + ' 处 / ' + unresolvedBySymbol.length + ' 符号\n');
+      for (const entry of unresolved) {
+        log.append('# ' + entry.file + ':' + entry.line + ':' + entry.column + '  ' + entry.symbol + '\n');
+      }
+    }
+    const symSummary = unresolvedBySymbol.slice(0, 12)
+      .map((entry) => entry.symbol + '×' + entry.count).join(', ');
+    const human = [
+      'gen-golden  lang=' + lang + '  ' + runTarget,
+      'src        ' + relPath(cwd, srcAbs),
+      '编译失败   ' + (compile.spawnError ?? ('kotlinc 退出码 ' + String(compile.exitCode))) +
+        '（' + formatSeconds(compile.durationMs) + '）',
+    ];
+    if (unresolved.length > 0) {
+      human.push('边界       fail-closed：' + unresolved.length + ' 处未解析引用 / ' + unresolvedBySymbol.length +
+        ' 个符号（' + oneLine(symSummary, 100) + '）');
+      human.push('清单       --json / --report 的 unresolvedReferences；日志 ' + logRef);
+    }
+    human.push('日志       ' + logRef);
+    human.push('结果: FAIL（编译失败，未生成 golden' + (unresolved.length > 0 ? '；边界依赖未解析' : '') + '）');
     emit({
       ok: false, stage: 'compile',
-      message: compile.spawnError ?? ('kotlinc 退出码 ' + String(compile.exitCode)),
+      message: (compile.spawnError ?? ('kotlinc 退出码 ' + String(compile.exitCode))) +
+        (unresolved.length > 0 ? '；fail-closed：' + unresolved.length + ' 处未解析引用 / ' +
+          unresolvedBySymbol.length + ' 个符号' : ''),
       lang, src: relPath(cwd, srcAbs), main: relPath(cwd, mainAbs), package: pkg, mainClass,
       classesDir: relPath(cwd, classesAbs), goldenPath: relPath(cwd, goldenAbs),
       runs: 0, stable: false,
       compile: { exitCode: compile.exitCode, durationMs: compile.durationMs },
       run: { exitCode: null, durationMs: 0 }, warnings: [], logPath: logRef,
-    }, raw, cwd, [
-      'gen-golden  lang=' + lang + '  ' + runTarget,
-      'src        ' + relPath(cwd, srcAbs),
-      '编译失败   ' + (compile.spawnError ?? ('kotlinc 退出码 ' + String(compile.exitCode))) +
-        '（' + formatSeconds(compile.durationMs) + '）',
-      '日志       ' + logRef,
-      '结果: FAIL（编译失败，看日志尾部定位）',
-    ]);
+      unresolvedReferences: unresolved,
+      manualExtractions: manualReport,
+    }, raw, cwd, human);
   }
 
   // ---- 跑两次，逐字节比较 stdout ----
@@ -577,6 +898,8 @@ function runJvm(raw: RawCli, cwd: string, timeoutMs: number): void {
         compile: { exitCode: compile.exitCode, durationMs: compile.durationMs },
         run: { exitCode: runExitCode, durationMs: runDurations.reduce((sum, value) => sum + value, 0) },
         warnings: [], logPath: logRef, runDurations,
+        unresolvedReferences: [],
+        manualExtractions: manualReport,
       }, raw, cwd, [
         'gen-golden  lang=' + lang + '  ' + runTarget,
         '编译       kotlinc ' + formatSeconds(compile.durationMs) + '（exit 0）',
@@ -605,6 +928,8 @@ function runJvm(raw: RawCli, cwd: string, timeoutMs: number): void {
       compile: { exitCode: compile.exitCode, durationMs: compile.durationMs },
       run: { exitCode: runExitCode, durationMs: runDurationMs },
       warnings: warningMessages, warningDetails: warnings, logPath: logRef, runDurations,
+      unresolvedReferences: [],
+      manualExtractions: manualReport,
     }, raw, cwd, [
       'gen-golden  lang=' + lang + '  ' + runTarget,
       '编译       kotlinc ' + formatSeconds(compile.durationMs) + '（exit 0）',
@@ -641,9 +966,15 @@ function runJvm(raw: RawCli, cwd: string, timeoutMs: number): void {
     goldenSha256: goldenHash,
     goldenBytes: firstOutput.length,
     runDurations,
+    unresolvedReferences: [],
+    manualExtractions: manualReport,
   }, raw, cwd, [
     'gen-golden  lang=' + lang + '  ' + runTarget,
     'src        ' + srcArg + '（' + countKtFiles(srcAbs) + ' 个 .kt）',
+    ...(manualReport === null ? [] : [
+      '边界       manualExtractions 已应用 ' + manualReport.stubsApplied.length + ' stub / ' +
+        String(manualReport.replacementsApplied.length) + ' replacement（临时副本 ' + manualReport.workSrc + '）',
+    ]),
     '编译       kotlinc ' + formatSeconds(compile.durationMs) + '（exit 0）',
     '运行       kotlin 两次 ' + runDurations.map(formatSeconds).join(' + ') + '（exit 0/0）',
     '稳定性     两次 stdout 逐字节一致  sha256 ' + goldenHash.slice(0, 12) + '…  ' + firstOutput.length + ' 字节',
@@ -678,6 +1009,9 @@ function runJsTs(raw: RawCli, cwd: string, timeoutMs: number): void {
   }
   if (optional(raw, 'package') !== null) {
     failUsage('--package 仅 --lang jvm 支持（js-ts 没有 Kotlin 包名）');
+  }
+  if (optional(raw, 'manual-extractions') !== null) {
+    failUsage('--manual-extractions 仅 --lang jvm 支持（js-ts 没有编译边界）');
   }
 
   const mainArg = optional(raw, 'main');

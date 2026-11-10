@@ -31,7 +31,7 @@
    等价于 ``kotlinc src -d out && kotlin -cp out io.legado...Main > golden.json``；两次输出逐字节一致才写 golden。
 3. 外部证据就位 + 语义转写重放：
    ```bash
-   node scripts/stage-case.mjs --refs <legado>/.refs   # 22 文件 / 4,925 行，GPL 派生不入库
+   node scripts/stage-case.mjs --refs /mnt/d/Project/legado-with-MD3/.refs   # 22 文件 / 4,925 行，GPL 派生不入库
    node cases/legado/replay.ts > out/actual.json
    ```
 4. 门禁：

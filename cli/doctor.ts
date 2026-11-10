@@ -2,7 +2,7 @@
 /**
  * 环境/工程预检（doctor）：在构建前一次性查清「环境为什么跑不起来」。
  *
- * 背景：环境错一次要烧 3-6 万 token 试错。
+ * 背景：环境错一次要烧 3-6 万 token 试错（docs/tooling-backlog.md §5.2）。
  * 本工具只做确定性检查：逐项 PASS/FAIL/WARN + 一句话修法 + rules/pitfalls.md 锚点。
  *
  * 用法：

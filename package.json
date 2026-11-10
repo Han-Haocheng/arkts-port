@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Source-level Android -> HarmonyOS (ArkTS) migration pipeline with verifiable gates",
+  "license": "MIT",
+  "author": "Han-Haocheng",
+  "repository": { "type": "git", "url": "git+https://github.com/Han-Haocheng/arkts-port.git" },
+  "homepage": "https://github.com/Han-Haocheng/arkts-port#readme",
+  "keywords": ["harmonyos", "arkts", "android", "migration", "codemod", "typescript", "mcp", "verification"],
   "engines": { "node": ">=22" },
   "scripts": {
     "coupling": "node cli/analyze-coupling.ts",
@@ -25,6 +30,6 @@
     "js-ts-case": "node cases/js-ts/run.mjs",
     "device-test": "node cli/device-test.ts",
     "docs-metrics": "node cli/docs-metrics.ts",
-    "test": "node --test"
+    "test": "node --test tests/"
   }
 }

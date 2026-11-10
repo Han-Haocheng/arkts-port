@@ -431,7 +431,7 @@ test('参数错误：缺 target / 未知参数 / --install 无 --hap / --hap 无
 // 真实 --check smoke（无真机/无 hdc 时 skip）
 // ---------------------------------------------------------------------------
 
-test('真实 --check：192.0.2.10:40135 在线则 PASS，否则 skip', (t) => {
+test('真实 --check：10.42.0.48:40135 在线则 PASS，否则 skip', (t) => {
   const hdcEnv = process.env.ARKTS_DEVICE_TEST_HDC ?? '';
   const sdk = process.env.OHOS_BASE_SDK_HOME ?? '';
   const candidates = [hdcEnv, sdk === '' ? '' : join(sdk, '26.0.0', 'toolchains', 'hdc')].filter((path) => path !== '');
@@ -440,7 +440,7 @@ test('真实 --check：192.0.2.10:40135 在线则 PASS，否则 skip', (t) => {
     t.skip('缺 ARKTS_DEVICE_TEST_HDC / OHOS_BASE_SDK_HOME，跳过真实设备 smoke');
     return;
   }
-  const target = '192.0.2.10:40135';
+  const target = '10.42.0.48:40135';
   const probe = spawnSync(hdc, ['list', 'targets'], { encoding: 'utf8', timeout: 30000 });
   if (probe.status !== 0 || !(probe.stdout ?? '').includes(target)) {
     t.skip('真机 ' + target + ' 未连接，跳过真实设备 smoke');

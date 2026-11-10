@@ -17,9 +17,9 @@
  *       **0 ERROR + 0 WARN 才 PASS**；--no-fix/--g3-record 退化为基线记录（INFO，用于对比 136 ERROR）
  *
  * 外部依赖（均不入库）：
- *   yoga 源：$ARKTS_PORT_YOGA_SRC（MIT；或 ARKTS_PORT_YOGA_SRC）
- *   --sdk / OHOS_BASE_SDK_HOME     默认 $OHOS_BASE_SDK_HOME
- *   --hvigor / HVIGOR_HOME         默认 $HVIGOR_HOME
+ *   yoga 源：/mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout（MIT；或 ARKTS_PORT_YOGA_SRC）
+ *   --sdk / OHOS_BASE_SDK_HOME     默认 /mnt/d/Project/legado-with-MD3/.ohos-sdk/linux
+ *   --hvigor / HVIGOR_HOME         默认 /mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules
  *   arkts-check 参照工程：$ARKTS_PORT_CASE_REFS/arkts-check（默认 legado .refs）
  *
  * 产物：out/js-ts-yoga/（gitignored）；退出码：0 = G1-G4 全 PASS（G3 默认 0/0）、1 = 有 FAIL、2 = 用法。
@@ -33,9 +33,9 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const OUT = join(repoRoot, 'out', 'js-ts-yoga');
 const CASE = join(repoRoot, 'cases', 'js-ts-yoga');
-const DEFAULT_SDK = process.env.OHOS_BASE_SDK_HOME || '';
-const DEFAULT_HVIGOR = process.env.HVIGOR_HOME || '';
-const REFS_ROOT = process.env.ARKTS_PORT_CASE_REFS || '';
+const DEFAULT_SDK = '/mnt/d/Project/legado-with-MD3/.ohos-sdk/linux';
+const DEFAULT_HVIGOR = '/mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules';
+const REFS_ROOT = process.env.ARKTS_PORT_CASE_REFS || '/mnt/d/Project/legado-with-MD3/.refs';
 const GATES = ['g1', 'g2', 'g3', 'g4'];
 const YOGA_DIR_SUFFIX = '/src/native-ts/yoga-layout';
 

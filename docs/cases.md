@@ -1,5 +1,7 @@
 # Cases
 
+[Documentation index](README.md) · [简体中文](cases.zh-CN.md)
+
 Three cases are committed as reproducible evidence. Each one keeps third-party source outside the repository: only harnesses, golden/actual data, and the scripts that drive them are committed.
 
 ## 1. Setup
@@ -191,5 +193,5 @@ The tool never bypasses signing. An unsigned HAP fails with error 9568320; stale
 
 - **External evidence is staged, not vendored.** `stage-case.mjs` copies the legado TypeScript baseline, verifies sha256, and writes a deterministic provenance file. `cases/js-ts-yoga/stage.mjs` does the same for the two yoga files after one import rewrite.
 - **Only case artifacts are committed.** Harnesses, golden/actual JSON, case runners, and case-local fixes are in the repository. Third-party source, `out/`, and parity projects are not.
-- **Licenses stay with the sources.** The legado transcript is GPL-derived; the yoga source is MIT. Neither is committed, and neither license is relicensed by this repository. The repository itself has no LICENSE file.
+- **Licenses stay with the sources.** The legado transcript is GPL-derived; the yoga source is MIT. Neither is committed, and neither license is relicensed by this repository. The repository itself is MIT-licensed; see [LICENSE](../LICENSE) and [THIRD_PARTY_LICENSES](../THIRD_PARTY_LICENSES).
 - **Case results are scoped.** Fidelity numbers apply to the committed scenarios only. Coverage, UI behavior, and rendering equivalence are explicitly out of scope.

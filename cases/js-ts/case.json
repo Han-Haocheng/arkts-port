@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "js-ts",
+  "title": "chapterProgress js-ts 机制案例（2 场景 / 7 items）",
+  "lang": "js-ts",
+  "mode": "runner",
+  "upstream": {
+    "paths": [
+      "/mnt/d/Project/legado-with-MD3/.refs/js-ts/src/utils/chapterProgress.ts",
+      "/mnt/d/Project/legado-with-MD3/modules/web/src/utils/chapterProgress.ts"
+    ],
+    "license": "GPL-3.0",
+    "inRepo": false,
+    "note": "上游源码不入库；缺失时所有 gate SKIP → exit 3"
+  },
+  "external": {
+    "refsEnv": "ARKTS_PORT_CASE_REFS",
+    "refsDefault": "/mnt/d/Project/legado-with-MD3/.refs"
+  },
+  "defaults": {
+    "sdkEnv": "OHOS_BASE_SDK_HOME",
+    "hvigorEnv": "HVIGOR_HOME"
+  },
+  "runner": {
+    "cmd": [
+      "node",
+      "cases/js-ts/run.mjs"
+    ],
+    "jsonFlag": "--json",
+    "stageFlag": "--stage",
+    "updateFlag": "--update",
+    "stages": [
+      "g1",
+      "g2",
+      "g3",
+      "g4"
+    ],
+    "passthrough": [
+      "--sdk",
+      "--hvigor",
+      "--update"
+    ],
+    "evidence": "out/js-ts/evidence.json"
+  },
+  "expected": {
+    "goldenSha256": "088634ad98c741b00d87b7cd5692c0f89bc4fa31397d45f7492ab940501892ef",
+    "scenarios": 2,
+    "items": 7,
+    "note": "仅展示；断言以 run.mjs 退出码与 evidence.pass 为准"
+  }
+}

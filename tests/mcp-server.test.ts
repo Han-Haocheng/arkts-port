@@ -341,13 +341,13 @@ test('tools/call device-test check：参数拼装正确（fake hdc；无设备�
   const dir = mkdtempSync(join(tmpdir(), 'arkts-port-mcp-device-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const fakeHdc = join(dir, 'fake-hdc.sh');
-  writeFileSync(fakeHdc, '#!/bin/sh\necho "fake hdc: no device (192.0.2.10:40135)" >&2\nexit 1\n', 'utf8');
+  writeFileSync(fakeHdc, '#!/bin/sh\necho "fake hdc: no device (10.42.0.48:40135)" >&2\nexit 1\n', 'utf8');
   chmodSync(fakeHdc, 0o755);
   const logPath = join(dir, 'device-test.log');
   const client = withServer(t, [], repoRoot, { HDC: fakeHdc });
   const response = await client.request('tools/call', {
     name: 'device-test',
-    arguments: { target: '192.0.2.10:40135', check: true, log: logPath, timeout: 5000 },
+    arguments: { target: '10.42.0.48:40135', check: true, log: logPath, timeout: 5000 },
   });
   assert.equal(isErrorOf(response), true, '无设备时应 isError=true');
   const text = textOf(response);

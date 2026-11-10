@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| 上游目录（外部路径） | `<dsh-TUI>/src/native-ts/yoga-layout/` |
+| 上游目录（外部路径） | `/mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout/` |
 | 文件 | `index.ts`（100,293 B）、`enums.ts`（4,486 B） |
 | LOC | 3,104 + 199 = **3,303** |
 | sha256（2026-11-09 实测） | `index.ts` = `a7924bb6d44f19f771254bbbf86f84a8807eb4a183d7ea141f6bd66cff473d1d`；`enums.ts` = `be1742fb580c9da1e02fd8cc3b5d0bd9e66870e184ac0a6ebb24cab11f79256d` |
@@ -38,7 +38,7 @@ node cases/js-ts-yoga/stage.mjs --json
 node cases/js-ts-yoga/stage.mjs --check --json
 
 # 覆盖上游/输出目录（可选）
-node cases/js-ts-yoga/stage.mjs --src <dsh-TUI>/src/native-ts/yoga-layout --out out/js-ts-yoga/src/yoga
+node cases/js-ts-yoga/stage.mjs --src /mnt/d/Project/dsh-TUI/src/native-ts/yoga-layout --out out/js-ts-yoga/src/yoga
 ```
 
 实测（`out/js-ts-yoga/stage.json`）：
@@ -94,7 +94,7 @@ node cases/js-ts-yoga/run.mjs --stage all            # 人读摘要；--json 输
 #       退出码 0 = G1-G4 全 PASS（--no-fix/--g3-record 时 G3 只记录）
 
 # 分步（与 run.mjs 等价；均已实测）
-node cli/extract-closure.ts --root <dsh-TUI> \
+node cli/extract-closure.ts --root /mnt/d/Project/dsh-TUI \
   --entry src/native-ts/yoga-layout/index.ts --lang js-ts \
   --out out/js-ts-yoga/closure --report out/js-ts-yoga/closure.json --json
 node cli/pack-context.ts --closure out/js-ts-yoga/closure --lang js-ts \
@@ -139,13 +139,13 @@ node cases/js-ts-yoga/run.mjs --stage g3
 # 手工（与 run.mjs 等价）：先修复，再 probe（0/0）
 node cases/js-ts-yoga/arkts-fix.mjs --json
 mkdir -p out/js-ts-yoga/parity
-cp -a <legado>/.refs/arkts-check out/js-ts-yoga/parity
+cp -a /mnt/d/Project/legado-with-MD3/.refs/arkts-check out/js-ts-yoga/parity
 mkdir -p out/js-ts-yoga/parity/entry/src/main/ets/parity/yoga
 cp out/js-ts-yoga/adapt-fixed/yoga/index.ets out/js-ts-yoga/adapt-fixed/yoga/enums.ets \
    out/js-ts-yoga/parity/entry/src/main/ets/parity/yoga/
 node cli/reachability-probe.ts --project out/js-ts-yoga/parity \
-  --sdk <legado>/.ohos-sdk/linux \
-  --hvigor <legado>/.ohos-tools/node_modules --json \
+  --sdk /mnt/d/Project/legado-with-MD3/.ohos-sdk/linux \
+  --hvigor /mnt/d/Project/legado-with-MD3/.ohos-tools/node_modules --json \
   --report out/js-ts-yoga/reach-fixed.json
 # 基线复现（136）：改用 out/js-ts-yoga/adapt/yoga/*.ets 走同一命令，--report out/js-ts-yoga/reach-baseline.json
 ```
@@ -232,7 +232,7 @@ node cases/js-ts-yoga/arkts-fix.mjs --json          # 单独跑修复，命中�
 node cases/js-ts-yoga/stage.mjs --check --json
 
 # 2) 手工分步（等价）
-node cli/extract-closure.ts --root <dsh-TUI> \
+node cli/extract-closure.ts --root /mnt/d/Project/dsh-TUI \
   --entry src/native-ts/yoga-layout/index.ts --lang js-ts \
   --out out/js-ts-yoga/closure --report out/js-ts-yoga/closure.json --json
 node cli/pack-context.ts --closure out/js-ts-yoga/closure --lang js-ts \

@@ -1,0 +1,642 @@
+{
+  "version": "1.1.0",
+  "description": "四类转换占比评估规则（确定性、可审计；只评估不转换）。v1.1：新增 conservative profile（默认），broad 保留 v1.0 口径作对照；改规则请升 version。",
+  "languages": {
+    "jvm": {
+      "extensions": [
+        ".kt",
+        ".java"
+      ],
+      "denominator": {
+        "excludeDirNames": [
+          "build",
+          "out",
+          "dist",
+          "generated",
+          "node_modules",
+          "oh_modules",
+          "harmony"
+        ],
+        "excludeDirReasons": {
+          "build": "build",
+          "out": "build",
+          "dist": "build",
+          "generated": "generated",
+          "node_modules": "dependency",
+          "oh_modules": "dependency",
+          "harmony": "other-language"
+        },
+        "excludePathRules": [
+          {
+            "id": "build-dir",
+            "regex": "(^|/)build/",
+            "reason": "build"
+          },
+          {
+            "id": "generated-dir",
+            "regex": "(^|/)generated/",
+            "reason": "generated"
+          },
+          {
+            "id": "generated-src",
+            "regex": "(^|/)generated-src/",
+            "reason": "generated"
+          },
+          {
+            "id": "test-srcset",
+            "regex": "(^|/)src/(test|androidTest)/",
+            "reason": "test"
+          },
+          {
+            "id": "testflavor-srcset",
+            "regex": "(^|/)src/(testComic|androidTestComic)/",
+            "reason": "test-variant"
+          },
+          {
+            "id": "test-dir",
+            "regex": "(^|/)(test|androidTest)(/|$)",
+            "reason": "test"
+          },
+          {
+            "id": "generated-file",
+            "regex": "(^|/)(R\\.java|BuildConfig\\.(java|kt))$",
+            "reason": "generated"
+          },
+          {
+            "id": "generated-proto",
+            "regex": "\\.(pb|g)\\.(kt|java)$",
+            "reason": "generated"
+          }
+        ],
+        "note": "分母仅 .kt/.java；build/generated/test（含 testComic/androidTestComic）/依赖与隐藏目录不计；XML 单列不进分母。隐藏目录（.refs/.git 等）统一排除。"
+      },
+      "categories": {
+        "nonConvertible": {
+          "definition": "平台/JVM 专有实现胶水、JVM-only 库、平台服务、生成代码、UI 框架内部；严格清单，不把「难」算「不可能」",
+          "confidence": 0.9,
+          "pathRules": [],
+          "contentRules": [
+            {
+              "id": "jni-load-library",
+              "regex": "\\bSystem\\.loadLibrary\\b"
+            },
+            {
+              "id": "jni-external-fun",
+              "regex": "\\bexternal\\s+fun\\b"
+            },
+            {
+              "id": "jvm-reflection",
+              "regex": "\\bjava\\.lang\\.reflect\\b"
+            },
+            {
+              "id": "jvm-method-handle",
+              "regex": "\\bjava\\.lang\\.invoke\\b"
+            },
+            {
+              "id": "sun-misc",
+              "regex": "\\bsun\\.misc\\b"
+            },
+            {
+              "id": "platform-service-manager",
+              "regex": "\\bandroid\\.os\\.ServiceManager\\b"
+            },
+            {
+              "id": "platform-binder",
+              "regex": "\\bandroid\\.os\\.IBinder\\b"
+            },
+            {
+              "id": "platform-package-manager",
+              "regex": "\\bIPackageManager\\b"
+            },
+            {
+              "id": "platform-android-system",
+              "regex": "\\bandroid\\.system\\.\\b"
+            },
+            {
+              "id": "jvm-awt",
+              "regex": "\\bjava\\.awt\\b"
+            },
+            {
+              "id": "jvm-swing",
+              "regex": "\\bjavax\\.swing\\b"
+            },
+            {
+              "id": "jvm-beans",
+              "regex": "\\bjava\\.beans\\b"
+            },
+            {
+              "id": "jvm-rmi",
+              "regex": "\\bjava\\.rmi\\b"
+            },
+            {
+              "id": "jvm-script-engine",
+              "regex": "\\bjavax\\.script\\b"
+            },
+            {
+              "id": "compose-ui-internals",
+              "regex": "\\bandroidx\\.compose\\.ui\\.node\\."
+            },
+            {
+              "id": "compose-runtime-composer",
+              "regex": "\\bandroidx\\.compose\\.runtime\\.Composer\\b"
+            },
+            {
+              "id": "compose-android-view-internals",
+              "regex": "\\bandroidx\\.compose\\.ui\\.platform\\.AndroidComposeView\\b"
+            }
+          ],
+          "jvmOnlyImportRules": [
+            {
+              "id": "jvm-only-rhino",
+              "regex": "^org\\.mozilla\\.javascript\\."
+            },
+            {
+              "id": "jvm-only-awt",
+              "regex": "^java\\.awt(\\..*)?$"
+            },
+            {
+              "id": "jvm-only-swing",
+              "regex": "^javax\\.swing(\\..*)?$"
+            },
+            {
+              "id": "jvm-only-beans",
+              "regex": "^java\\.beans(\\..*)?$"
+            },
+            {
+              "id": "jvm-only-rmi",
+              "regex": "^java\\.rmi(\\..*)?$"
+            },
+            {
+              "id": "jvm-only-script",
+              "regex": "^javax\\.script(\\..*)?$"
+            },
+            {
+              "id": "jvm-only-sun",
+              "regex": "^(sun\\.misc|com\\.sun)\\."
+            }
+          ],
+          "samples": [
+            "System.loadLibrary / external fun：JNI 绑定，ArkTS 无可直接对应的 native 加载方式",
+            "java.lang.reflect / java.lang.invoke：JVM 反射与方法句柄，ArkTS 不支持",
+            "org.mozilla.javascript：JVM-only JavaScript 引擎（Rhino）胶水，需替换运行时而非转写"
+          ]
+        },
+        "manual": {
+          "definition": "UI/Compose/View/Activity/Fragment/ViewModel、动画/手势/自定义绘制、WebView/AndroidView、复杂生命周期；人工重写但可行",
+          "confidence": 0.95,
+          "importRules": [
+            {
+              "id": "ui-compose",
+              "regex": "^androidx\\.compose\\."
+            },
+            {
+              "id": "ui-activity",
+              "regex": "^androidx\\.activity\\."
+            },
+            {
+              "id": "ui-fragment",
+              "regex": "^androidx\\.fragment\\."
+            },
+            {
+              "id": "ui-lifecycle-viewmodel",
+              "regex": "^androidx\\.lifecycle\\.(ViewModel|AndroidViewModel|viewmodel)"
+            },
+            {
+              "id": "ui-appcompat",
+              "regex": "^androidx\\.appcompat\\."
+            },
+            {
+              "id": "ui-recyclerview",
+              "regex": "^androidx\\.recyclerview\\."
+            },
+            {
+              "id": "ui-viewpager",
+              "regex": "^androidx\\.viewpager"
+            },
+            {
+              "id": "ui-constraintlayout",
+              "regex": "^androidx\\.constraintlayout\\."
+            },
+            {
+              "id": "ui-material",
+              "regex": "^com\\.google\\.android\\.material\\."
+            },
+            {
+              "id": "ui-android-view",
+              "regex": "^android\\.view\\."
+            },
+            {
+              "id": "ui-android-widget",
+              "regex": "^android\\.widget\\."
+            },
+            {
+              "id": "ui-android-animation",
+              "regex": "^android\\.animation\\."
+            },
+            {
+              "id": "ui-android-graphics",
+              "regex": "^android\\.graphics\\."
+            },
+            {
+              "id": "ui-android-gesture",
+              "regex": "^android\\.gesture\\."
+            },
+            {
+              "id": "ui-android-webkit",
+              "regex": "^android\\.webkit\\."
+            },
+            {
+              "id": "ui-miuix",
+              "regex": "^top\\.yukonga\\.miuix\\."
+            }
+          ],
+          "contentRules": [
+            {
+              "id": "ui-composable",
+              "regex": "\\b@Composable\\b"
+            },
+            {
+              "id": "ui-java-extends",
+              "regex": "\\bextends\\s+(Activity|Fragment|AppCompatActivity|DialogFragment|View|SurfaceView|ViewGroup|RecyclerView|Adapter|ViewModel|Application)\\b"
+            },
+            {
+              "id": "ui-kotlin-extends",
+              "regex": ":\\s*[A-Za-z0-9_.]*(Activity|Fragment|AppCompatActivity|ViewModel|SurfaceView|ViewGroup|Application)\\s*\\("
+            },
+            {
+              "id": "ui-webview",
+              "regex": "\\bWebView\\b"
+            },
+            {
+              "id": "ui-androidview",
+              "regex": "\\bAndroidView\\b"
+            },
+            {
+              "id": "ui-setcontentview",
+              "regex": "\\bsetContentView\\b"
+            },
+            {
+              "id": "ui-custom-draw",
+              "regex": "\\b(onDraw|onMeasure|onLayout|dispatchTouchEvent)\\s*\\("
+            },
+            {
+              "id": "ui-animator",
+              "regex": "\\b(ObjectAnimator|ValueAnimator|AnimatorSet|MotionLayout)\\b"
+            }
+          ],
+          "samples": [
+            "Compose @Composable / androidx.compose.*：UI 需按 ArkUI 重写",
+            "Activity/Fragment/ViewModel/View：生命周期与视图树重写",
+            "WebView/AndroidView/自定义绘制/动画：平台渲染能力，人工重写"
+          ]
+        },
+        "semiAutomated": {
+          "definition": "非 UI，平台耦合窄（coroutines-only 或 Android 依赖<=N）且 internal<=8；对应边界拆分候选",
+          "confidence": 0.7,
+          "narrowConfidence": 0.8,
+          "broadConfidence": 0.55,
+          "narrow": {
+            "maxAndroidImports": 8,
+            "maxInternalImports": 8,
+            "coroutinesOnly": true
+          },
+          "samples": [
+            "只 import kotlinx.coroutines.* 的非 UI 文件：边界拆分后可转写",
+            "android.* 依赖 <= 8 且项目内部 import <= 8：抽接口/适配层后转写",
+            "耦合宽（或内部依赖 > 8）：仍属半自动，但需先做边界拆分，置信度低"
+          ]
+        },
+        "automated": {
+          "definition": "无平台耦合、非 UI、纯逻辑；对应 analyze-coupling auto；是能力上限，不代表已实证",
+          "confidence": 0.85,
+          "disclaimer": "能力上限：由静态规则判定，不代表该文件已实际移植/编译/通过 golden 验证。",
+          "samples": [
+            "无 android/androidx/com.google.android/dagger/kotlinx.coroutines import 的非 UI 文件",
+            "仅用 java.*/kotlin.*/项目内部依赖的算法、解析、数据结构代码"
+          ]
+        }
+      },
+      "conservative": {
+        "definition": "独立子智能体严格口径的保守评估：A 纯逻辑、S 有界边界、M 人工移植、N 严格不可转；宽口径 broad 保留作对照。",
+        "denominator": {
+          "includeTestVariants": true,
+          "productionOnlyPathRules": [
+            {
+              "id": "test-variant",
+              "regex": "(^|/)src/(testComic|androidTestComic)/",
+              "reason": "test-macrobenchmark"
+            },
+            {
+              "id": "baseline-profile",
+              "regex": "(^|/)baselineProfile/",
+              "reason": "test-macrobenchmark"
+            }
+          ],
+          "note": "默认分母 2,108/404,343（含 testComic/androidTestComic 13 文件/1,378 行 + baselineProfile 2 文件/210 行）；--production-only 再排除 baselineProfile，2,093/402,755；XML 单列、不进分母。与 broad 的差异：broad 额外排除 test-variant，故 2,095/402,965。"
+        },
+        "reference": {
+          "source": "out/conversion-share/REPORT.md + numbers.json（独立子智能体严格口径，任务卡转录）",
+          "capturedAt": "2026-11-10",
+          "denominator": {
+            "files": 2108,
+            "lines": 404343
+          },
+          "productionOnly": {
+            "files": 2093,
+            "lines": 402755
+          },
+          "categories": {
+            "automated": {
+              "files": 385,
+              "lines": 27577,
+              "percent": 6.82
+            },
+            "semiAutomated": {
+              "files": 423,
+              "lines": 50571,
+              "percent": 12.51
+            },
+            "manual": {
+              "files": 1235,
+              "lines": 315932,
+              "percent": 78.13
+            },
+            "nonConvertible": {
+              "files": 65,
+              "lines": 10263,
+              "percent": 2.54
+            }
+          },
+          "tolerancePt": 0.5,
+          "note": "REPORT.md/numbers.json 在当前工作区已被清理，数字按任务卡转录；运行目录内若存在 numbers.json 则优先读取，否则用本 reference。差异文件 top N 仅能给出本工具侧样本（子智能体逐文件标签不可得）。"
+        },
+        "categories": {
+          "nonConvertible": {
+            "definition": "严格 N0：Rhino/JS 引擎、JNI/Cronet/libarchive、JVM test/macrobenchmark；不含 Ktor/Android 组件/vendored 库移植",
+            "confidence": 0.9,
+            "samples": [
+              "modules/rhino/**：Rhino JS 引擎模块",
+              "System.loadLibrary / external fun：JNI",
+              "org.chromium.net / libarchive：Cronet 与解压 native",
+              "src/testComic、src/androidTestComic、baselineProfile：JVM test/macrobenchmark"
+            ]
+          },
+          "manual": {
+            "definition": "UI/Compose/View/Activity/Fragment/ViewModel/生命周期/服务/绘制/动画/WebView/media/引擎/vendored 库移植；人工重写但可行",
+            "confidence": 0.9,
+            "samples": [
+              "androidx.compose / @Composable：ArkUI 重写",
+              "service/**、media/**：后台/媒体能力重写",
+              "app/lib/**、modules/book/**：vendored 库移植"
+            ]
+          },
+          "semiAutomated": {
+            "definition": "非 UI 有界 adapter/boundary：Room/DAO/entity、prefs/settings、窄 repo/usecase、file/context/uri、窄 help、UI 包内窄 support；vendored/复杂引擎不算 S；S 是边界拆分候选，不代表已实现半自动",
+            "confidence": 0.65,
+            "samples": [
+              "data/dao、data/entities、data/repository：Room/DAO/entity 与窄 repo",
+              "help/config、settings、utils：prefs/settings 与 file/context/uri 边界",
+              "ui/** 内非 UI 的窄 support；domain/gateway 接口"
+            ]
+          },
+          "automated": {
+            "definition": "纯逻辑/数据：无 android/androidx/compose、无 java.io/zip/crypto、无三方运行时依赖、无 coroutines、无 UI/生命周期；annotation-only 平台 import 可 A",
+            "confidence": 0.8,
+            "disclaimer": "能力上限：由 conservative 静态规则判定，不代表该文件已实际移植/编译/通过 golden 验证；与子智能体严格口径对齐仍允许 ±0.5pt 行占比误差。",
+            "samples": [
+              "无平台 import 的算法/解析/数据结构",
+              "annotation-only 平台 import 的纯数据类",
+              "仅用 java.*/kotlin.*/项目内部依赖的纯逻辑"
+            ]
+          }
+        },
+        "rules": {
+          "nonConvertible": {
+            "pathRules": [
+              {
+                "id": "test-variant",
+                "regex": "(^|/)src/(testComic|androidTestComic)/"
+              },
+              {
+                "id": "baseline-profile",
+                "regex": "(^|/)baselineProfile/"
+              },
+              {
+                "id": "rhino-module",
+                "regex": "(^|/)modules/rhino/"
+              },
+              {
+                "id": "libarchive-wrapper",
+                "regex": "(^|/)utils/ArchiveUtils\\.kt$"
+              },
+              {
+                "id": "js-engine-bridge",
+                "regex": "(^|/)help/JsExtensions\\.kt$"
+              }
+            ],
+            "importRules": [
+              {
+                "id": "cronet",
+                "regex": "^org\\.chromium\\.(net|cronet)"
+              },
+              {
+                "id": "libarchive",
+                "regex": "libarchive"
+              }
+            ],
+            "contentRules": [
+              {
+                "id": "jni-load-library",
+                "regex": "\\bSystem\\.loadLibrary\\b"
+              },
+              {
+                "id": "jni-external-fun",
+                "regex": "\\bexternal\\s+fun\\b"
+              }
+            ],
+            "rhinoImportRule": {
+              "id": "rhino-import",
+              "regex": "^org\\.mozilla\\.javascript\\."
+            },
+            "rhinoExceptionPathRules": [
+              {
+                "id": "service",
+                "regex": "(^|/)service/"
+              },
+              {
+                "id": "media",
+                "regex": "(^|/)(media|audio|tts|exoplayer|player|readaloud)/"
+              }
+            ]
+          },
+          "automated": {
+            "pathExcludeRules": [
+              {
+                "id": "vendored-font-parser",
+                "regex": "(^|/)model/analyzeRule/QueryTTF\\.java$"
+              }
+            ],
+            "blockedImportRules": [
+              {
+                "id": "java-io",
+                "regex": "^java\\.io\\."
+              },
+              {
+                "id": "java-zip",
+                "regex": "^java\\.util\\.zip\\.|^java\\.util\\.jar\\."
+              },
+              {
+                "id": "java-nio-file",
+                "regex": "^java\\.nio\\.file\\."
+              },
+              {
+                "id": "java-crypto",
+                "regex": "^javax\\.crypto\\.|^java\\.security\\.|^javax\\.net\\.ssl\\."
+              },
+              {
+                "id": "coroutines",
+                "regex": "^kotlinx\\.coroutines\\."
+              }
+            ],
+            "platformImportRules": [
+              {
+                "id": "android",
+                "regex": "^android\\."
+              },
+              {
+                "id": "androidx",
+                "regex": "^androidx\\."
+              },
+              {
+                "id": "google-android",
+                "regex": "^com\\.google\\.android\\."
+              }
+            ],
+            "annotationImportRule": {
+              "id": "annotation",
+              "regex": "^androidx?\\.annotation\\.|^android\\.annotation\\."
+            },
+            "thirdPartyAnnotationRegex": "\\.annotations?\\.|^com\\.google\\.gson\\.annotations\\.",
+            "allowedImportPrefixes": [
+              "java\\.",
+              "javax\\.",
+              "kotlin\\.",
+              "io\\.legado\\.app\\.",
+              "com\\.script\\.",
+              "kotlinx\\."
+            ],
+            "excludedPathRules": [
+              {
+                "id": "vendored-lib",
+                "regex": "(^|/)app/lib/"
+              },
+              {
+                "id": "modules-book",
+                "regex": "(^|/)modules/book/"
+              },
+              {
+                "id": "lib-dir",
+                "regex": "(^|/)lib/"
+              }
+            ],
+            "note": "A 判定顺序：N0/UI/vendored 先排除；再查 blocked imports（java.io/zip/nio.file/crypto/coroutines）；平台 import 仅 annotation-only 允许；三方 import 仅 annotation-like 允许；pathExcludeRules 的 vendored 引擎（QueryTTF）不算 A。"
+          },
+          "semiAutomated": {
+            "pathIncludeRules": [
+              {
+                "id": "room-dao-entity",
+                "regex": "(^|/)data/(dao|entities|prefs|settings|repository|database)/"
+              },
+              {
+                "id": "help",
+                "regex": "(^|/)help/"
+              },
+              {
+                "id": "ui-support",
+                "regex": "(^|/)ui/"
+              },
+              {
+                "id": "settings-config",
+                "regex": "(^|/)(settings|config|preferences)/|(^|/)constant/"
+              },
+              {
+                "id": "gateway",
+                "regex": "(^|/)domain/gateway/"
+              },
+              {
+                "id": "utils",
+                "regex": "(^|/)utils/"
+              }
+            ],
+            "maxLines": 850,
+            "capExemptPathRules": [
+              {
+                "id": "room-dao-entity",
+                "regex": "(^|/)data/(dao|entities)/"
+              }
+            ],
+            "excludedPathRules": [
+              {
+                "id": "service",
+                "regex": "(^|/)service/"
+              },
+              {
+                "id": "media",
+                "regex": "(^|/)(media|audio|tts|exoplayer|player|readaloud)/"
+              },
+              {
+                "id": "vendored-lib",
+                "regex": "(^|/)app/lib/"
+              },
+              {
+                "id": "modules-book",
+                "regex": "(^|/)modules/book/"
+              }
+            ],
+            "note": "S 判定顺序：非 N0、非 UI、非 vendored/service/media；命中 pathIncludeRules；行数 <= maxLines（Room DAO/entity 例外，始终 S）；否则 M。"
+          },
+          "manual": {
+            "note": "M = 其余：UI/服务/media/复杂引擎/大文件/vendored 库；含 UI import 或 UI content 的文件优先归 M。"
+          }
+        }
+      }
+    }
+  },
+  "shared": {
+    "analyzePlatformImportRegexes": [
+      "^\\s*import\\s+(android\\.|androidx\\.|com\\.google\\.android\\.|dagger\\.|kotlinx\\.coroutines)"
+    ],
+    "analyzeNote": "与 cli/analyze-coupling.ts 的 jvm platformPatterns 完全一致；用于一致性检查（auto 子集）。注意 analyze-coupling 只按目录名 test/androidTest 排除，本工具还排除 testComic/androidTestComic（test-variant），全仓文件数会略多。",
+    "additionalPlatformImportRegexes": [
+      "^android\\.",
+      "^androidx\\.",
+      "^com\\.google\\.android",
+      "^dagger\\.",
+      "^kotlinx\\.coroutines",
+      "^org\\.koin",
+      "^splitties",
+      "^top\\.yukonga\\.miuix"
+    ],
+    "coroutineImportRegexes": [
+      "^kotlinx\\.coroutines"
+    ],
+    "androidImportRegexes": [
+      "^android\\.",
+      "^androidx\\.",
+      "^com\\.google\\.android",
+      "^dagger\\.",
+      "^com\\.huawei",
+      "^ohos\\."
+    ],
+    "internalPackageRegexes": [
+      "^io\\.legado\\.app\\.",
+      "^com\\.script\\."
+    ],
+    "uiImportRuleRef": "languages.jvm.categories.manual.importRules",
+    "output": {
+      "sampleLimit": 5,
+      "moduleLimit": 10,
+      "topDirDepth": 3
+    }
+  }
+}

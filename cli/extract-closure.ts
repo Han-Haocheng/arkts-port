@@ -1729,10 +1729,14 @@ const USAGE = [
   '  --root <dir>       必填，工程根目录（全工程扫描一次，用于建 package/import/声明索引）',
   '  --entry <file>     必填，闭包入口（相对 --root 或绝对路径），.kt/.java',
   '  --lang <id>        语言适配器：jvm（.kt/.java，默认）/ js-ts（.js/.jsx/.ts/.tsx/.mjs/.cjs）',
-  '  --out <dir>        把 include 文件按原相对路径复制到该目录；不能等于或位于 --root 内',
-  '                     会按目录里的 .extract-closure-manifest.json 清理上次写过、本次不再',
-  '                     include 的旧文件；没有清单时不动任何文件，也不删非本工具写的文件',
-  '  --force            仅调试用：允许 --out 位于 --root 内（默认 exit 2）',
+  '  --out <dir>        把 include 文件按原相对路径复制到该目录。默认允许落在 --root 内的',
+  '                     安全子目录（.refs/、out/、dist/、build/）；其它子目录需 --allow-out-in-root；',
+  '                     不能等于 --root 或作为 --root 的父目录。会按目录里的',
+  '                     .extract-closure-manifest.json 清理上次写过、本次不再 include 的旧文件；',
+  '                     没有清单时不动任何文件，也不删非本工具写的文件',
+  '  --allow-out-in-root  允许 --out 落在 --root 内的任意非源码子目录（默认只允许 .refs/out/dist/build；',
+  '                     已有源码文件（.kt/.java/.ts/...）的目录仍拒绝，fail-closed）',
+  '  --force            兼容旧用法：等价于 --allow-out-in-root 并打警告（仅调试）',
   '  --report <file>    把 JSON 报告写到文件',
   '  --json             把 JSON 报告打到 stdout（同时给 --report 时两者一致）',
   '  --no-package-complete  关闭 package 补全，只保留严格引用闭包（更小，可能缺同包符号）',
@@ -1782,17 +1786,18 @@ interface CliArgs {
   json: boolean;
   packageComplete: boolean;
   force: boolean;
+  allowOutInRoot: boolean;
   noAlias: boolean;
   help: boolean;
 }
 
-const BOOL_FLAGS = new Set(['json', 'help', 'h', 'no-package-complete', 'no-alias', 'force']);
+const BOOL_FLAGS = new Set(['json', 'help', 'h', 'no-package-complete', 'no-alias', 'force', 'allow-out-in-root']);
 const VALUE_FLAGS = new Set(['root', 'entry', 'lang', 'out', 'report']);
 
 class UsageError extends Error {}
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { lang: 'jvm', json: false, packageComplete: true, force: false, noAlias: false, help: false };
+  const args: CliArgs = { lang: 'jvm', json: false, packageComplete: true, force: false, allowOutInRoot: false, noAlias: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
     if (!token.startsWith('-')) throw new UsageError('多余的参数：' + token);
@@ -1801,6 +1806,7 @@ function parseArgs(argv: string[]): CliArgs {
       if (name === 'json') args.json = true;
       else if (name === 'help' || name === 'h') args.help = true;
       else if (name === 'force') args.force = true;
+      else if (name === 'allow-out-in-root') args.allowOutInRoot = true;
       else if (name === 'no-alias') args.noAlias = true;
       else args.packageComplete = false;
       continue;
@@ -1841,6 +1847,41 @@ function isInsideOrEqual(parent: string, child: string): boolean {
 
 /** --out 目录里的受管清单：只清理「上次本工具写过」的文件，绝不碰任意用户文件。 */
 const OUT_MANIFEST = '.extract-closure-manifest.json';
+
+/** --out 默认允许落在 --root 内的安全子目录（构建/缓存/引用目录，不属于上游源码树）。 */
+export const SAFE_OUT_SUBDIRS = new Set(['.refs', 'out', 'dist', 'build']);
+const SOURCE_FILE_EXTS = new Set(['.kt', '.kts', '.java', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.ets']);
+
+/** outDir 相对 root 的第一段（小写）；不在 root 内返回 ''。 */
+function firstRelSegment(root: string, target: string): string {
+  const rel = relative(root, target).split(sep).filter((part) => part !== '' && part !== '.');
+  return rel.length === 0 ? '' : rel[0].toLowerCase();
+}
+
+/** fail-closed：目录里（递归）只要已有源码文件，就拒绝把它当 --out。 */
+function directoryHasSourceFiles(dir: string): boolean {
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        stack.push(path);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (SOURCE_FILE_EXTS.has(extname(entry.name).toLowerCase())) return true;
+    }
+  }
+  return false;
+}
 
 function isSafeRelPath(rel: string): boolean {
   if (typeof rel !== 'string' || rel.length === 0) return false;
@@ -2011,10 +2052,24 @@ function main(): void {
     if (existsSync(outDir) && !statSync(outDir).isDirectory()) fail('--out 是文件而不是目录：' + outDir, 2);
     if (samePath(outDir, root)) fail('--out 不能等于 --root（会覆盖上游源码）', 2);
     if (isInsideOrEqual(root, outDir)) {
-      if (!args.force) {
-        fail('--out 不能位于 --root 内（会把文件写进上游源码树）；确需如此请加 --force', 2);
+      // 允许 .refs/out/dist/build 这类安全子目录（工作区内常见落盘位置），仍保护源码树
+      const segment = firstRelSegment(root, outDir);
+      const safeSubdir = SAFE_OUT_SUBDIRS.has(segment);
+      const allowAnyInsideRoot = args.allowOutInRoot || args.force;
+      if (!safeSubdir && !allowAnyInsideRoot) {
+        fail('--out 位于 --root 内且不是安全子目录（' + [...SAFE_OUT_SUBDIRS].join('/') + '）：' + outDir +
+          '；如确需写入其它子目录，用 --allow-out-in-root（已有源码文件的目录仍会拒绝）', 2);
       }
-      console.error('extract-closure: 警告：--out 位于 --root 内（--force），可能污染上游源码树：' + outDir);
+      if (!safeSubdir) {
+        if (existsSync(outDir) && directoryHasSourceFiles(outDir)) {
+          fail('拒绝写入源码目录：--out 内已有源码文件（.kt/.java/.ts/...）：' + outDir +
+            '；请换一个空目录或 --root 之外的目录', 2);
+        }
+        console.error('extract-closure: 警告：--out 位于 --root 内（' +
+          (args.force ? '--force' : '--allow-out-in-root') + '），会写进工程目录：' + outDir);
+      } else if (args.force) {
+        console.error('extract-closure: 警告：--force 已启用（--out 位于 --root 内的安全子目录 ' + segment + '/）');
+      }
     } else if (isInsideOrEqual(outDir, root)) {
       fail('--out 不能是 --root 的父目录（会覆盖上游源码）', 2);
     }

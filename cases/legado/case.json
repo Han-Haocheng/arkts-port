@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "id": "legado",
+  "title": "legado JVM 分页闭包（22 文件 / 4,925 行）",
+  "lang": "jvm",
+  "mode": "stages",
+  "upstream": {
+    "paths": [
+      "/mnt/d/Project/legado-with-MD3/.refs/arkts-adapt-baseline",
+      "/mnt/d/Project/legado-with-MD3/.refs/pag-exp/src"
+    ],
+    "license": "GPL-3.0",
+    "inRepo": false,
+    "note": "外部 GPL 证据；缺失时非 optional stage SKIP → exit 3"
+  },
+  "external": {
+    "refsEnv": "ARKTS_PORT_CASE_REFS",
+    "refsDefault": "/mnt/d/Project/legado-with-MD3/.refs"
+  },
+  "defaults": {
+    "sdkEnv": "OHOS_BASE_SDK_HOME",
+    "hvigorEnv": "HVIGOR_HOME"
+  },
+  "stages": [
+    {
+      "name": "stage",
+      "title": "外部证据就位（22 文件 / 4,925 行）",
+      "argv": [
+        "node",
+        "scripts/stage-case.mjs",
+        "--refs",
+        "${refs}",
+        "--case",
+        "cases/legado",
+        "--json"
+      ],
+      "optional": false,
+      "expect": {
+        "exit": 0,
+        "report": {
+          "files": 22,
+          "loc": 4925
+        }
+      }
+    },
+    {
+      "name": "replay",
+      "title": "重放 62 页",
+      "argv": [
+        "node",
+        "cases/legado/replay.ts"
+      ],
+      "stdoutFile": "out/case/legado/actual.json",
+      "optional": false
+    },
+    {
+      "name": "fidelity",
+      "title": "保真 100%（62/62）",
+      "argv": [
+        "node",
+        "cli/verify-fidelity.ts",
+        "--golden",
+        "cases/legado/golden.json",
+        "--actual",
+        "out/case/legado/actual.json",
+        "--json"
+      ],
+      "optional": false,
+      "expect": {
+        "exit": 0,
+        "report": {
+          "fidelityPct": 100,
+          "sameItems": 62,
+          "totalItems": 62
+        }
+      }
+    },
+    {
+      "name": "golden",
+      "title": "golden 稳定（可选）",
+      "argv": [
+        "node",
+        "cli/gen-golden.ts",
+        "--lang",
+        "jvm",
+        "--src",
+        "${refs}/pag-exp/src",
+        "--main",
+        "${refs}/pag-exp/src/Main.kt",
+        "--out",
+        "out/case/legado/golden",
+        "--logs",
+        "out/logs",
+        "--json"
+      ],
+      "optional": true,
+      "expect": {
+        "exit": 0,
+        "report": {
+          "goldenBytes": 38826
+        }
+      }
+    },
+    {
+      "name": "adapt",
+      "title": "codemod 43/41/9/9/7（可选）",
+      "argv": [
+        "node",
+        "cli/adapt-arkts.ts",
+        "--src",
+        "${refs}/arkts-adapt-baseline",
+        "--out",
+        "out/case/legado/ets",
+        "--ets",
+        "--json"
+      ],
+      "optional": true
+    },
+    {
+      "name": "diff",
+      "title": "needs-review 0（可选）",
+      "argv": [
+        "node",
+        "cli/diff-gate.ts",
+        "--before",
+        "${refs}/arkts-adapt-baseline",
+        "--after",
+        "out/case/legado/ets",
+        "--strict",
+        "--json"
+      ],
+      "optional": true
+    },
+    {
+      "name": "acceptance",
+      "title": "acceptance 发布回归（可选）",
+      "argv": [
+        "node",
+        "scripts/acceptance.mjs",
+        "--refs",
+        "${refs}",
+        "--out",
+        "out/case/legado/acceptance",
+        "--json"
+      ],
+      "optional": true
+    }
+  ],
+  "expected": {
+    "goldenSha256": "6bd4d649389203c38ec5d9cd158442af5cb31812cb3becb9987a02df311e77c7",
+    "tsFiles": 22,
+    "tsLoc": 4925,
+    "fidelityPct": 100,
+    "note": "仅展示；断言由 stage-case/verify-fidelity/acceptance 自己给"
+  }
+}

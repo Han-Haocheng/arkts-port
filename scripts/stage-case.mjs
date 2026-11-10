@@ -11,7 +11,7 @@
  *   node scripts/stage-case.mjs [--refs <dir>] [--case cases/legado] [--dest <dir>]
  *                               [--check] [--json] [--help]
  *
- *   --refs <dir>    外部证据根目录，默认 $ARKTS_PORT_CASE_REFS
+ *   --refs <dir>    外部证据根目录，默认 /mnt/d/Project/legado-with-MD3/.refs
  *                   （可用环境变量 ARKTS_PORT_CASE_REFS 覆盖；显式 --refs 优先级最高）
  *   --case <dir>    案例目录，默认 cases/legado（相对当前工作目录）
  *   --dest <dir>    复制目标，默认 <case>/ts（该目录在 .gitignore 里，不入库）
@@ -41,7 +41,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 
-const DEFAULT_REFS = process.env.ARKTS_PORT_CASE_REFS || '';
+const DEFAULT_REFS = '/mnt/d/Project/legado-with-MD3/.refs';
 const REFS_ENV = 'ARKTS_PORT_CASE_REFS';
 const BASELINE_DIR = 'arkts-adapt-baseline';
 const MANAGED_DIRS = ['layout', 'model', 'style'];

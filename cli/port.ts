@@ -16,14 +16,15 @@ import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-type StageName = 'analyze' | 'adapt' | 'diff' | 'fidelity' | 'lint' | 'reach' | 'build' | 'device';
+type StageName = 'analyze' | 'adapt' | 'autofix' | 'diff' | 'fidelity' | 'lint' | 'reach' | 'build' | 'device';
 type StageStatus = 'PASS' | 'WARN' | 'FAIL' | 'SKIP';
 
-const STAGE_ORDER: StageName[] = ['analyze', 'adapt', 'diff', 'fidelity', 'lint', 'reach', 'build', 'device'];
+const STAGE_ORDER: StageName[] = ['analyze', 'adapt', 'autofix', 'diff', 'fidelity', 'lint', 'reach', 'build', 'device'];
 
 const STAGE_TITLE: Record<StageName, string> = {
   analyze: '耦合分诊',
   adapt: 'ArkTS 机械适配',
+  autofix: 'ArkTS 机械修复（可选）',
   diff: '适配只动类型层告警',
   fidelity: '保真度门禁',
   lint: 'ArkTS 编译门禁',
@@ -35,6 +36,7 @@ const STAGE_TITLE: Record<StageName, string> = {
 const STAGE_TOOL: Record<StageName, string> = {
   analyze: 'analyze-coupling',
   adapt: 'adapt-arkts',
+  autofix: 'arkts-fix',
   diff: 'diff-gate',
   fidelity: 'verify-fidelity',
   lint: 'lint-arkts',
@@ -56,7 +58,8 @@ const USAGE = [
   '用法：',
   '  node cli/port.ts [--project <harmony>] [--case <dir>] [--src <dir>] [--adapted <dir>]',
   '       [--actual <a.json>] [--sdk <p>] [--hvigor <p>]',
-  '       [--stages analyze,adapt,diff,fidelity,lint,reach,build,device|all] [--report <path.json>]',
+  '       [--stages analyze,adapt,autofix,diff,fidelity,lint,reach,build,device|all] [--report <path.json>]',
+  '       [--autofix] [--no-autofix] [--arkts-fix-out <dir>]',
   '       [--device <ip:port>] [--signed-hap <hap>] [--bundle <id>] [--ability <EntryAbility>]',
   '       [--hdc <p>] [--device-timeout <ms>]',
   '       [--json] [--continue] [--strict-diff]',
@@ -64,10 +67,13 @@ const USAGE = [
   '阶段（固定按此顺序执行；--stages 只选子集，执行顺序不变；默认 all）：',
   '  analyze   对 --src 跑 analyze-coupling（无 --src → SKIP）',
   '  adapt     adapt-arkts：--src → --adapted（默认输出 .ets；工具未就绪 → SKIP；扫描 0 文件/残留视为失败）',
-  '  diff      diff-gate：--before（默认 --adapt-src/--src）→ --after（默认 --adapted）；',
+  '  autofix   可选（--autofix 才启用）：arkts-fix 对 adapt 产物做机械修复 → <logs>/autofix；',
+  '            transforms>0 时下游 diff 用 fixed 目录；0 transforms 时直接用 adapt 产物（不复制）',
+  '  diff      diff-gate：--before（默认 --adapt-src/--src）→ --after（默认 --adapted，autofix 有修复时用 fixed）；',
   '            exit 0 → PASS；exit 3 → WARN（只告警、不阻断后续）；其它 → FAIL；输入缺失 → SKIP',
   '  fidelity  verify-fidelity：--case/golden.json 对比 actual',
   '            actual 选择顺序：--actual > replay.ts 重放 > <case>/actual.json',
+  '            可选透传 --fidelity-key/--fidelity-items/--fidelity-field → --key/--items/--field',
   '  lint      lint-arkts --project（需要 SDK + hvigor）',
   '  reach     reachability-probe --project（需要 SDK + hvigor）',
   '  build     build-hap --project（需要 SDK + hvigor）',
@@ -94,8 +100,15 @@ const USAGE = [
   '  --no-ets              adapt 输出保持 .ts（默认给 adapt-arkts 传 --ets）',
   '  --strict-diff         diff 阶段把 WARN（needs-review>0）视为 FAIL',
   '  --no-replay           fidelity 不尝试 replay.ts 重放',
+  '  --fidelity-key <name> 透传 verify-fidelity 的 --key（场景键字段；默认 scenario）',
+  '  --fidelity-items <name> 透传 verify-fidelity 的 --items（逐项比较数组字段；默认 pages）',
+  '  --fidelity-field <name> 透传 verify-fidelity 的 --field（逐项比较字段；默认 text）',
   '  --no-explain          lint/reach FAIL 时不自动跑 explain-errors（默认自动；不改变门禁结论）',
   '  --explain-max <n>     自动 explain 取前 n 条（默认 5；人类摘要每阶段最多 3 行）',
+  '  --autofix             启用可选 autofix 阶段（默认关闭；需要 cli/arkts-fix.ts）；fixed 目录只影响 diff，',
+  '                        lint/reach/build 仍按 --project',
+  '  --no-autofix          显式关闭 autofix（默认就是关闭；与 --autofix 同时给时以 --no-autofix 为准）',
+  '  --arkts-fix-out <dir> autofix 输出目录（默认 <logs>/autofix；仅 --autofix 时有效）',
   '  --device <ip:port>    启用可选 device 阶段（不提供则阶段序列保持 7 阶段）',
   '  --signed-hap <hap>    AGC 签名 HAP：提供则 install+launch+screenshot（需要 --bundle）；不提供则 check-only',
   '  --bundle <id>         install 的 bundleName（提供 --signed-hap 时必填）',
@@ -145,6 +158,14 @@ interface Ctx {
   explainMax: number;
   /** 可选 device 阶段：--device <ip:port> 才启用 */
   device: string;
+  /** 可选 autofix 阶段：--autofix 启用（默认关闭；--no-autofix 显式关闭） */
+  autofix: boolean;
+  /** arkts-fix --out 目录（默认 <logs>/autofix） */
+  autofixOut: string;
+  /** arkts-fix --report 路径（默认 <logs>/autofix-report.json） */
+  autofixReport: string;
+  /** autofix transforms>0 时下游（diff 等）使用的 fixed 目录；0 transforms 时保持 null（直接用 adapt 产物） */
+  fixedDir: string | null;
   /** AGC 签名 HAP；提供则 install+launch，不提供则 check-only */
   signedHap: string;
   bundle: string;
@@ -194,10 +215,12 @@ interface ChildRun {
 const VALUE_OPTS = new Set([
   'project', 'case', 'src', 'adapted', 'actual', 'sdk', 'hvigor',
   'stages', 'report', 'logs', 'mode', 'timeout', 'ets-src', 'entry', 'lang', 'adapt-src',
-  'explain-max', 'device', 'signed-hap', 'bundle', 'ability', 'hdc', 'device-timeout',
+  'explain-max', 'device', 'signed-hap', 'bundle', 'ability', 'hdc', 'device-timeout', 'arkts-fix-out',
+  'fidelity-key', 'fidelity-items', 'fidelity-field',
 ]);
 const BOOL_OPTS = new Set([
-  'json', 'continue', 'ets', 'no-ets', 'no-replay', 'allow-residuals', 'strict-diff', 'no-explain', 'help',
+  'json', 'continue', 'ets', 'no-ets', 'no-replay', 'allow-residuals', 'strict-diff', 'no-explain',
+  'autofix', 'no-autofix', 'help',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -244,9 +267,13 @@ function parseCliArgs(argv: string[]): RawCli {
   return raw;
 }
 
-function resolveStages(raw: RawCli, deviceEnabled: boolean): StageName[] {
-  // device 默认不启用：只有提供 --device <ip:port> 才进入阶段序列（默认 all 也保持 7 阶段语义）
-  const available = deviceEnabled ? [...STAGE_ORDER] : STAGE_ORDER.filter((stage) => stage !== 'device');
+function resolveStages(raw: RawCli, deviceEnabled: boolean, autofixEnabled: boolean): StageName[] {
+  // device / autofix 默认不启用：只有显式开启才进入阶段序列（默认 all 仍保持原有语义）
+  const available = STAGE_ORDER.filter((stage) => {
+    if (stage === 'device') return deviceEnabled;
+    if (stage === 'autofix') return autofixEnabled;
+    return true;
+  });
   const text = optional(raw, 'stages');
   if (text === null) return available;
   const pieces = text.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
@@ -260,8 +287,11 @@ function resolveStages(raw: RawCli, deviceEnabled: boolean): StageName[] {
     if (piece === 'device' && !deviceEnabled) {
       failUsage('--stages 包含 device，但缺少 --device <ip:port>（device 阶段默认不启用）');
     }
+    if (piece === 'autofix' && !autofixEnabled) {
+      failUsage('--stages 包含 autofix，但缺少 --autofix（autofix 阶段默认不启用）');
+    }
     if (!available.includes(piece as StageName)) {
-      failUsage('未知阶段："' + piece + '"（可用：all 或 ' + available.join(',') + '；device 需 --device）');
+      failUsage('未知阶段："' + piece + '"（可用：all 或 ' + available.join(',') + '；device 需 --device，autofix 需 --autofix）');
     }
     picked.add(piece as StageName);
   }
@@ -508,7 +538,7 @@ function prereqDiff(ctx: Ctx): string | null {
   const before = ctx.adaptSrc;
   if (before === null) return '缺少 --src（或 --adapt-src）：diff 的 --before 输入目录';
   if (!isDirectory(resolve(ctx.cwd, before))) return '--before 目录不存在：' + before;
-  const after = opt(ctx, 'adapted');
+  const after = ctx.fixedDir ?? opt(ctx, 'adapted');
   if (after === null) return '缺少 --adapted：diff 的 --after 输入目录';
   if (!isDirectory(resolve(ctx.cwd, after))) return '--after 目录不存在：' + after;
   return null;
@@ -570,9 +600,17 @@ function prereqDevice(ctx: Ctx): string | null {
   return null;
 }
 
+function prereqAutofix(ctx: Ctx): string | null {
+  const adapted = opt(ctx, 'adapted');
+  if (adapted === null) return '缺少 --adapted（autofix 的输入目录）';
+  if (!isDirectory(resolve(ctx.cwd, adapted))) return '--adapted 目录不存在：' + adapted;
+  return null;
+}
+
 const STAGE_PREREQ: Record<StageName, (ctx: Ctx) => string | null> = {
   analyze: prereqAnalyze,
   adapt: prereqAdapt,
+  autofix: prereqAutofix,
   diff: prereqDiff,
   fidelity: prereqFidelity,
   lint: prereqLint,
@@ -671,7 +709,7 @@ function runAdapt(ctx: Ctx): StageOutcome {
 
 function runDiff(ctx: Ctx): StageOutcome {
   const before = ctx.adaptSrc as string;
-  const after = opt(ctx, 'adapted') as string;
+  const after = ctx.fixedDir ?? (opt(ctx, 'adapted') as string);
   const run = runChild(ctx, toolPath(ctx, 'diff'), ['--before', before, '--after', after, '--json']);
   const parsed = asObject(parseJsonValue(run.stdout));
   const counts = parsed ? asObject(parsed.counts) : null;
@@ -720,12 +758,108 @@ function runDiff(ctx: Ctx): StageOutcome {
   };
 }
 
+interface FidelitySchemaIssue {
+  message: string;
+  itemsKey: string;
+  fieldKey: string | null;
+}
+
+function suggestionField(items: unknown[]): string | null {
+  const first = items.find((item) => item !== null && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown> | undefined;
+  if (first === undefined) return null;
+  for (const key of ['value', 'text', 'label', 'title']) {
+    if (key in first) return key;
+  }
+  for (const [key, value] of Object.entries(first)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return key;
+  }
+  return Object.keys(first)[0] ?? null;
+}
+
+/**
+ * 防假 PASS：verify-fidelity 默认 items=pages/field=text；当 golden 用 result/results 等
+ * 数组字段时 totalItems=0，场景键相同就会 NO_ITEMS 通过。这里在 spawn 前做 schema 检查，
+ * 要求显式 --fidelity-items/--fidelity-field（或改 golden），否则直接 FAIL。
+ */
+function fidelitySchemaIssue(ctx: Ctx, goldenRel: string): FidelitySchemaIssue | null {
+  let parsed: unknown;
+  try {
+    parsed = parseJsonValue(readFileSync(resolve(ctx.cwd, goldenRel), 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  const keyName = opt(ctx, 'fidelity-key') ?? 'scenario';
+  const itemsOpt = opt(ctx, 'fidelity-items');
+  const fieldOpt = opt(ctx, 'fidelity-field');
+  // 显式指定任一项时交给 verify-fidelity 判定（保持既有透传契约；本守卫只抓“默认值误用”）
+  if (itemsOpt !== null || fieldOpt !== null) return null;
+  const itemsKey = 'pages';
+  const fieldKey = 'text';
+  const scenarios = parsed.filter((item): item is Record<string, unknown> =>
+    item !== null && typeof item === 'object' && !Array.isArray(item));
+  if (scenarios.length === 0) return null;
+  const arrayKeys = new Set<string>();
+  for (const scenario of scenarios) {
+    for (const [key, value] of Object.entries(scenario)) {
+      if (key !== keyName && Array.isArray(value)) arrayKeys.add(key);
+    }
+  }
+  if (arrayKeys.size === 0) return null;
+  const known = [...arrayKeys].sort();
+  if (!arrayKeys.has(itemsKey)) {
+    const firstKey = known[0];
+    const values = scenarios.flatMap((scenario) => {
+      const value = scenario[firstKey];
+      return Array.isArray(value) ? (value as unknown[]) : [];
+    });
+    const field = suggestionField(values);
+    const fieldHint = field === null ? '' : ' --fidelity-field ' + field;
+    return {
+      itemsKey: firstKey,
+      fieldKey: field,
+      message: 'golden 使用数组字段 ' + known.join('/') + '（示例字段 ' + (field ?? '?') + '），' +
+        '默认 items=pages/field=text 会 totalItems=0 → NO_ITEMS 假 PASS；请加 --fidelity-items ' +
+        firstKey + fieldHint + '（或改 golden）。',
+    };
+  }
+  const itemArrays = scenarios.flatMap((scenario) => {
+    const value = scenario[itemsKey];
+    return Array.isArray(value) ? (value as unknown[]) : [];
+  });
+  const firstItem = itemArrays.find((item) =>
+    item !== null && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown> | undefined;
+  if (firstItem !== undefined && !(fieldKey in firstItem)) {
+    const suggested = suggestionField(itemArrays);
+    return {
+      itemsKey,
+      fieldKey: suggested,
+      message: 'golden 的 items=' + itemsKey + ' 条目没有字段 ' + fieldKey +
+        (suggested === null ? '' : '（示例字段 ' + suggested + '；请加 --fidelity-field ' + suggested + '）') +
+        '；继续会逐项比较空字段/假 PASS。',
+    };
+  }
+  return null;
+}
+
 function runFidelity(ctx: Ctx): StageOutcome {
   const caseArg = opt(ctx, 'case') as string;
   const caseAbs = resolve(ctx.cwd, caseArg);
   const golden = join(caseArg, 'golden.json');
   const notes: string[] = [];
   const commands: string[] = [];
+  const schemaIssue = fidelitySchemaIssue(ctx, golden);
+  if (schemaIssue !== null) {
+    return {
+      status: 'FAIL',
+      exitCode: 1,
+      summary: 'FAIL：' + schemaIssue.message,
+      metrics: { fidelityPct: 0, totalItems: 0, schemaMismatch: 'true' },
+      commands,
+      notes,
+      output: schemaIssue.message + '\n',
+    };
+  }
   let actual: string | null = opt(ctx, 'actual');
   let actualLabel = '--actual';
   let replayFallback = false;
@@ -773,7 +907,14 @@ function runFidelity(ctx: Ctx): StageOutcome {
       output: notes.join('\n') + '\n',
     };
   }
-  const run = runChild(ctx, toolPath(ctx, 'fidelity'), ['--golden', golden, '--actual', actual, '--json']);
+  const args = ['--golden', golden, '--actual', actual, '--json'];
+  const fidelityKey = opt(ctx, 'fidelity-key');
+  if (fidelityKey !== null) args.push('--key', fidelityKey);
+  const fidelityItems = opt(ctx, 'fidelity-items');
+  if (fidelityItems !== null) args.push('--items', fidelityItems);
+  const fidelityField = opt(ctx, 'fidelity-field');
+  if (fidelityField !== null) args.push('--field', fidelityField);
+  const run = runChild(ctx, toolPath(ctx, 'fidelity'), args);
   commands.push(run.command);
   const parsed = asObject(parseJsonValue(run.stdout));
   const pct = parsed ? num(parsed.fidelityPct) : null;
@@ -1058,9 +1199,69 @@ function runDevice(ctx: Ctx): StageOutcome {
   return { status, exitCode: run.exitCode, summary: text, metrics, commands: [run.command], notes: [], output: run.output };
 }
 
+function runAutofix(ctx: Ctx): StageOutcome {
+  const tool = join(ctx.cliDir, STAGE_TOOL.autofix + '.ts');
+  if (!isFile(tool)) {
+    return {
+      status: 'FAIL',
+      exitCode: null,
+      summary: 'cli/arkts-fix.ts 不存在（--autofix 已启用；确认工具已落地或去掉 --autofix）',
+      commands: [],
+      notes: ['--autofix 需要 cli/arkts-fix.ts：' + tool],
+      output: '',
+    };
+  }
+  const adapted = opt(ctx, 'adapted') as string;
+  const args = ['--src', adapted, '--out', ctx.autofixOut, '--json', '--report', ctx.autofixReport];
+  const run = runChild(ctx, tool, args);
+  const report = asObject(readJsonFile(ctx.autofixReport)) ?? asObject(parseJsonValue(run.stdout));
+  const totals = report !== null ? asObject(report.totals) : null;
+  const rulesRaw = report !== null ? asObject(report.rules) : null;
+  const rules = rulesRaw !== null ? Object.keys(rulesRaw).length : null;
+  const transforms = totals !== null ? num(totals.transforms) : null;
+  const changed = totals !== null ? num(totals.changed) : null;
+  const skips = totals !== null ? num(totals.skips) : null;
+  const status = statusOf(run);
+  let text: string;
+  if (status === 'FAIL') {
+    text = 'arkts-fix 失败：' + failureDetail(run) +
+      (run.exitCode === EXIT_USAGE ? '（检查 arkts-fix 的 --src/--out；默认 <logs>/autofix）' : '');
+  } else if (transforms === null) {
+    text = 'arkts-fix 成功但未读到报告（' + relPath(ctx, ctx.autofixReport) + '）';
+  } else if (transforms === 0) {
+    text = '0 transforms（直接用 adapt 产物，不复制）；（仅 diff；lint/reach/build 仍按 --project）';
+  } else {
+    text = '修复 ' + transforms + ' 处（rules ' + (rules ?? '?') + ' / changed ' + (changed ?? '?') +
+      ' / skips ' + (skips ?? 0) + '）→ ' + relPath(ctx, ctx.autofixOut) +
+      '；（仅 diff；lint/reach/build 仍按 --project）';
+  }
+  const metrics: Record<string, unknown> = {};
+  if (rules !== null) metrics.rules = rules;
+  if (transforms !== null) metrics.transforms = transforms;
+  if (changed !== null) metrics.changed = changed;
+  if (skips !== null) metrics.skips = skips;
+  // 诚实标注：fixed 目录只影响 diff；lint/reach/build 仍编译 --project
+  metrics.appliedToGates = false;
+  metrics.gatesSource = 'project';
+  if (status === 'PASS' && transforms !== null) {
+    if (transforms > 0) ctx.fixedDir = ctx.autofixOut;
+    metrics.fixedDir = relPath(ctx, ctx.fixedDir ?? resolve(ctx.cwd, adapted));
+  }
+  return {
+    status,
+    exitCode: run.exitCode,
+    summary: text,
+    metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
+    commands: [run.command],
+    notes: [],
+    output: run.output,
+  };
+}
+
 const STAGE_RUN: Record<StageName, (ctx: Ctx) => StageOutcome> = {
   analyze: runAnalyze,
   adapt: runAdapt,
+  autofix: runAutofix,
   diff: runDiff,
   fidelity: runFidelity,
   lint: runLint,
@@ -1236,7 +1437,11 @@ function main(): void {
     deviceTimeoutMs = parsedDeviceTimeout;
   }
 
-  const stages = resolveStages(raw, device !== '');
+  const autofix = raw.autofix === true && raw['no-autofix'] !== true;
+  if (!autofix && raw['arkts-fix-out'] !== undefined) {
+    failUsage('--arkts-fix-out 需要 --autofix（autofix 阶段默认不启用）');
+  }
+  const stages = resolveStages(raw, device !== '', autofix);
 
   const mode = optional(raw, 'mode') ?? 'debug';
   if (mode !== 'debug' && mode !== 'release') failUsage('--mode 只能是 debug 或 release：' + mode);
@@ -1287,6 +1492,9 @@ function main(): void {
 
   const logsDir = resolve(cwd, optional(raw, 'logs') ?? join('out', 'logs'));
   const reportPath = resolve(cwd, optional(raw, 'report') ?? join('out', 'port-report.json'));
+  const autofixOut = raw['arkts-fix-out'] !== undefined
+    ? resolve(cwd, String(raw['arkts-fix-out']))
+    : join(logsDir, 'autofix');
 
   try {
     mkdirSync(logsDir, { recursive: true });
@@ -1321,6 +1529,10 @@ function main(): void {
     adaptReport: join(logsDir, 'adapt-report.json'),
     explain,
     explainMax,
+    autofix,
+    autofixOut,
+    autofixReport: join(logsDir, 'autofix-report.json'),
+    fixedDir: null,
     device,
     signedHap,
     bundle,

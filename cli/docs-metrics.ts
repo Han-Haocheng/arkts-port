@@ -2,12 +2,12 @@
 /**
  * canonical metrics + 文档数字一致性检查。
  *
- * 背景：项目已有 10 处文档数字漂移（internal backlog §9）。本工具从真值文件
+ * 背景：项目已有 10 处文档数字漂移（docs/tooling-backlog.md §9）。本工具从真值文件
  * 重算 canonical 数字，并用 --check 扫描文档里的数字声明，把漂移变成可检测的 file:line。
  *
  * 用法：
  *   node cli/docs-metrics.ts --case cases/legado [--refs <dir>] [--coverage <json>]
- *        [--check README.md,README.zh-CN.md] [--json] [--report <path.json>]
+ *        [--check README.md,HANDOFF.md] [--json] [--report <path.json>]
  *
  * 退出码：0 = 计算成功（无 --check 或有 --check 且无 mismatch）；1 = --check 有 mismatch；
  *         2 = 用法/读取失败。
@@ -25,7 +25,7 @@ const ERRORS_JSON_PREFERRED = 'arkts-adapt-errors-with-full-reachability.json';
 const USAGE = [
   '用法：',
   '  node cli/docs-metrics.ts --case cases/legado [--refs <dir>] [--coverage <json>]',
-  '       [--check README.md,README.zh-CN.md] [--json] [--report <path.json>]',
+  '       [--check README.md,HANDOFF.md] [--json] [--report <path.json>]',
   '',
   '从真值文件重算 canonical 数字（无时间戳，同输入同输出）：',
   '  case（必算）       golden/actual 的场景数、页数、逐项保真度、actual md5',
@@ -48,7 +48,7 @@ const USAGE = [
   '',
   '示例：',
   '  node cli/docs-metrics.ts --case cases/legado --refs /path/.refs \\',
-  '       --coverage out/coverage.json --check README.md,README.zh-CN.md --json',
+  '       --coverage out/coverage.json --check README.md,HANDOFF.md --json',
 ].join('\n');
 
 interface RawCli {
